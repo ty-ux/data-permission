@@ -163,6 +163,7 @@ public final class SqlConditionBuilder {
                                             boolean denyWhenEmpty) {
         Set<String> tables = extractTables(plainSelect);
         Map<String, String> actualAliases = extractAliases(plainSelect);
+        Map<String, String> aliases = mergeAliases(actualAliases, annotationAliases);
 
         Map<String, List<DataPermissionRule>> rulesByTable = new LinkedHashMap<String, List<DataPermissionRule>>();
         for (DataPermissionRule rule : rules) {
@@ -184,8 +185,11 @@ public final class SqlConditionBuilder {
         Expression permission = null;
         for (Map.Entry<String, List<DataPermissionRule>> entry : rulesByTable.entrySet()) {
             String table = entry.getKey();
-            String alias = resolveAlias(table, annotationAliases, actualAliases);
-            Expression condition = buildTableCondition(entry.getValue(), alias, table, subject, parameter);
+            String alias = aliases.get(table);
+            if (alias == null || alias.isEmpty()) {
+                alias = table;
+            }
+            Expression condition = buildTableCondition(entry.getValue(), alias, aliases, subject, parameter);
             permission = permission == null
                     ? condition
                     : new AndExpression(new Parenthesis(permission), new Parenthesis(condition));
@@ -199,7 +203,9 @@ public final class SqlConditionBuilder {
         }
 
         Expression where = plainSelect.getWhere();
-        plainSelect.setWhere(where == null ? permission : new AndExpression(new Parenthesis(permission), where));
+        plainSelect.setWhere(where == null
+                ? permission
+                : new AndExpression(new Parenthesis(permission), new Parenthesis(where)));
         return true;
     }
 
@@ -245,24 +251,30 @@ public final class SqlConditionBuilder {
         aliases.put(name, alias);
     }
 
-    private static String resolveAlias(String table,
-                                       Map<String, String> annotationAliases,
-                                       Map<String, String> actualAliases) {
-        if (annotationAliases != null) {
-            for (Map.Entry<String, String> entry : annotationAliases.entrySet()) {
-                if (normalize(entry.getKey()).equals(table) && entry.getValue() != null
-                        && !entry.getValue().trim().isEmpty()) {
-                    return entry.getValue().trim();
+    private static Map<String, String> mergeAliases(Map<String, String> actualAliases,
+                                                    Map<String, String> annotationAliases) {
+        Map<String, String> aliases = new LinkedHashMap<String, String>();
+        if (actualAliases != null) {
+            for (Map.Entry<String, String> entry : actualAliases.entrySet()) {
+                if (entry.getKey() != null && entry.getValue() != null) {
+                    aliases.put(normalize(entry.getKey()), entry.getValue());
                 }
             }
         }
-        String actual = actualAliases.get(table);
-        return actual == null ? table : actual;
+        if (annotationAliases != null) {
+            for (Map.Entry<String, String> entry : annotationAliases.entrySet()) {
+                if (entry.getKey() != null && entry.getValue() != null
+                        && !entry.getValue().trim().isEmpty()) {
+                    aliases.put(normalize(entry.getKey()), entry.getValue().trim());
+                }
+            }
+        }
+        return aliases;
     }
 
     private static Expression buildTableCondition(List<DataPermissionRule> rules,
                                                   String alias,
-                                                  String table,
+                                                  Map<String, String> aliases,
                                                   DataPermissionSubject subject,
                                                   Object parameter) {
         List<DataPermissionRule> sorted = new ArrayList<DataPermissionRule>(rules);
@@ -285,7 +297,7 @@ public final class SqlConditionBuilder {
 
         Expression combined = null;
         for (DataPermissionRule rule : sorted) {
-            Expression current = buildRuleCondition(rule, alias, table, subject, parameter);
+            Expression current = buildRuleCondition(rule, alias, aliases, subject, parameter);
             if (current == null) {
                 current = falseExpression();
             }
@@ -300,20 +312,20 @@ public final class SqlConditionBuilder {
 
     private static Expression buildRuleCondition(DataPermissionRule rule,
                                                  String alias,
-                                                 String table,
+                                                 Map<String, String> aliases,
                                                  DataPermissionSubject subject,
                                                  Object parameter) {
         if (rule.getRuleMode() == RuleMode.COMPLEX
                 && rule.getItems() != null
                 && !rule.getItems().isEmpty()) {
-            return buildComplexCondition(rule, alias, table, subject, parameter);
+            return buildComplexCondition(rule, alias, aliases, subject, parameter);
         }
-        return buildSimpleCondition(rule, alias, table, subject, parameter);
+        return buildSimpleCondition(rule, alias, aliases, subject, parameter);
     }
 
     private static Expression buildSimpleCondition(DataPermissionRule rule,
                                                    String alias,
-                                                   String table,
+                                                   Map<String, String> aliases,
                                                    DataPermissionSubject subject,
                                                    Object parameter) {
         ConditionOperator operator = ConditionOperator.from(rule.getConditionType());
@@ -321,7 +333,7 @@ public final class SqlConditionBuilder {
             log.warn("Data permission rule [{}] has an invalid field or operator", rule.getId());
             return null;
         }
-        Column column = createColumn(rule.getFieldName(), alias, table);
+        Column column = createColumn(rule.getFieldName(), alias, aliases);
         if (column == null) {
             log.warn("Data permission rule [{}] has an invalid column: {}", rule.getId(), rule.getFieldName());
             return null;
@@ -350,7 +362,7 @@ public final class SqlConditionBuilder {
 
     private static Expression buildComplexCondition(DataPermissionRule rule,
                                                     String alias,
-                                                    String table,
+                                                    Map<String, String> aliases,
                                                     DataPermissionSubject subject,
                                                     Object parameter) {
         List<DataPermissionRuleItem> items = new ArrayList<DataPermissionRuleItem>(rule.getItems());
@@ -399,7 +411,7 @@ public final class SqlConditionBuilder {
             for (List<DataPermissionRuleItem> subGroup : subGroups.values()) {
                 Expression subExpression = null;
                 for (DataPermissionRuleItem item : subGroup) {
-                    Expression current = buildItemCondition(item, alias, table, subject, parameter);
+                    Expression current = buildItemCondition(item, alias, aliases, subject, parameter);
                     if (current == null) {
                         current = falseExpression();
                     }
@@ -435,7 +447,7 @@ public final class SqlConditionBuilder {
 
     private static Expression buildItemCondition(DataPermissionRuleItem item,
                                                  String alias,
-                                                 String table,
+                                                 Map<String, String> aliases,
                                                  DataPermissionSubject subject,
                                                  Object parameter) {
         ConditionOperator operator = ConditionOperator.from(item.getOperator());
@@ -443,7 +455,7 @@ public final class SqlConditionBuilder {
             log.warn("Data permission rule item [{}] has an invalid operator: {}", item.getId(), item.getOperator());
             return null;
         }
-        Column left = createColumn(item.getLeftExpr(), alias, table);
+        Column left = createColumn(item.getLeftExpr(), alias, aliases);
         if (left == null) {
             log.warn("Data permission rule item [{}] has an invalid left expression: {}", item.getId(), item.getLeftExpr());
             return null;
@@ -457,7 +469,7 @@ public final class SqlConditionBuilder {
 
         RightValueType rightType = item.getRightType() == null ? RightValueType.CONST : item.getRightType();
         if (rightType == RightValueType.FIELD) {
-            Column right = createColumn(item.getRightExpr(), alias, table);
+            Column right = createColumn(item.getRightExpr(), alias, aliases);
             if (right == null) {
                 log.warn("Data permission rule item [{}] has an invalid right expression: {}", item.getId(), item.getRightExpr());
                 return null;
@@ -594,7 +606,7 @@ public final class SqlConditionBuilder {
         return new StringValue(escape(String.valueOf(value)));
     }
 
-    private static Column createColumn(String expression, String alias, String tableName) {
+    private static Column createColumn(String expression, String alias, Map<String, String> aliases) {
         if (isBlank(expression)) {
             return null;
         }
@@ -604,8 +616,9 @@ public final class SqlConditionBuilder {
             if (parts.length != 2 || !isIdentifier(parts[0]) || !isIdentifier(parts[1])) {
                 return null;
             }
-            if (normalize(parts[0]).equals(normalize(tableName))) {
-                return new Column(alias + "." + parts[1]);
+            String mapped = aliases == null ? null : aliases.get(normalize(parts[0]));
+            if (mapped != null && !mapped.isEmpty()) {
+                return new Column(mapped + "." + parts[1]);
             }
             return new Column(parts[0] + "." + parts[1]);
         }

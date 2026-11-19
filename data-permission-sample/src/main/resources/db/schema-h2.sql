@@ -1,4 +1,6 @@
 drop table if exists demo_project;
+drop table if exists sim_project;
+drop table if exists sim_dept;
 drop table if exists sys_permission_rule;
 drop table if exists sys_permission_rule_item;
 drop table if exists sys_role_permission_rule;
@@ -10,6 +12,24 @@ create table demo_project
     dept_id  bigint,
     owner_no varchar(50),
     amount   decimal(12, 2)
+);
+
+create table sim_dept
+(
+    id         bigint primary key,
+    name       varchar(100),
+    manager_no varchar(50)
+);
+
+create table sim_project
+(
+    id        bigint primary key,
+    name      varchar(100),
+    dept_id   bigint,
+    owner_no  varchar(50),
+    create_by varchar(50),
+    status    char(1),
+    amount    decimal(12, 2)
 );
 
 create table sys_permission_rule

@@ -3,6 +3,19 @@ values (1, 'Alpha', 100, 'u1', 1000.00),
        (2, 'Beta', 100, 'u2', 2000.00),
        (3, 'Gamma', 200, 'u3', 3000.00);
 
+insert into sim_dept (id, name, manager_no)
+values (100, '研发', 'u1'),
+       (200, '销售', 'u3'),
+       (300, '财务', 'u9');
+
+insert into sim_project (id, name, dept_id, owner_no, create_by, status, amount)
+values (101, 'P101', 100, 'u1', 'u9', 'A', 100.00),
+       (102, 'P102', 100, 'u1', 'u9', 'B', 200.00),
+       (103, 'P103', 100, 'u2', 'u9', 'A', 300.00),
+       (104, 'P104', 200, 'u3', 'u1', 'B', 400.00),
+       (105, 'P105', 200, 'u3', 'u8', 'A', 500.00),
+       (106, 'P106', 300, 'u4', 'u9', 'A', 600.00);
+
 insert into sys_permission_rule (id, rule_name, app_point, table_name, field_name,
                                  condition_type, condition_value, rule_mode, logic_operator,
                                  sort_order, priority, enabled, description, is_del)

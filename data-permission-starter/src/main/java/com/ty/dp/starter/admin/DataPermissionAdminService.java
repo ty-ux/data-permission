@@ -1,5 +1,6 @@
 package com.ty.dp.starter.admin;
 
+import com.ty.dp.core.model.ConditionOperator;
 import com.ty.dp.core.model.DataPermissionRule;
 import com.ty.dp.core.model.DataPermissionRuleItem;
 import com.ty.dp.core.model.LogicOperator;
@@ -13,6 +14,7 @@ import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -88,6 +90,7 @@ public class DataPermissionAdminService {
         return rules.get(0);
     }
 
+    @Transactional
     public String saveRule(DataPermissionRule rule) {
         validate(rule);
         String ruleTable = SqlIdentifiers.table(properties.getTable().getRule());
@@ -96,7 +99,9 @@ public class DataPermissionAdminService {
             rule.setId(newId());
             insertRule(ruleTable, rule);
         } else {
-            updateRule(ruleTable, rule);
+            if (updateRule(ruleTable, rule) == 0) {
+                throw new IllegalArgumentException("Rule not found: " + rule.getId());
+            }
             jdbc.update("delete from " + itemTable + " where rule_id = :ruleId",
                     new MapSqlParameterSource("ruleId", rule.getId()));
         }
@@ -105,6 +110,7 @@ public class DataPermissionAdminService {
         return rule.getId();
     }
 
+    @Transactional
     public void deleteRules(List<String> ids) {
         if (ids == null || ids.isEmpty()) {
             return;
@@ -126,6 +132,7 @@ public class DataPermissionAdminService {
         return jdbc.queryForList(sql, new MapSqlParameterSource("roleId", roleId), String.class);
     }
 
+    @Transactional
     public void assignRoleRules(String roleId, List<String> ruleIds) {
         String roleRuleTable = SqlIdentifiers.table(properties.getTable().getRoleRule());
         jdbc.update("delete from " + roleRuleTable + " where role_id = :roleId",
@@ -156,14 +163,14 @@ public class DataPermissionAdminService {
         jdbc.update(sql, ruleParams(rule));
     }
 
-    private void updateRule(String table, DataPermissionRule rule) {
+    private int updateRule(String table, DataPermissionRule rule) {
         String sql = "update " + table
                 + " set rule_name = :ruleName, app_point = :appPoint, table_name = :tableName, "
                 + "field_name = :fieldName, condition_type = :conditionType, condition_value = :conditionValue, "
                 + "rule_mode = :ruleMode, logic_operator = :logicOperator, sort_order = :sortOrder, "
                 + "priority = :priority, enabled = :enabled, description = :description, update_time = now() "
                 + "where id = :id and is_del = '0'";
-        jdbc.update(sql, ruleParams(rule));
+        return jdbc.update(sql, ruleParams(rule));
     }
 
     private MapSqlParameterSource ruleParams(DataPermissionRule rule) {
@@ -284,11 +291,54 @@ public class DataPermissionAdminService {
             throw new IllegalArgumentException("tableName is required");
         }
         if (rule.getRuleMode() == RuleMode.COMPLEX) {
-            if (rule.getItems() == null || rule.getItems().isEmpty()) {
-                throw new IllegalArgumentException("A complex rule needs at least one item");
-            }
-        } else if (isBlank(rule.getFieldName()) || isBlank(rule.getConditionType())) {
+            validateComplex(rule);
+        } else {
+            validateSimple(rule);
+        }
+    }
+
+    private void validateSimple(DataPermissionRule rule) {
+        if (isBlank(rule.getFieldName()) || isBlank(rule.getConditionType())) {
             throw new IllegalArgumentException("A simple rule needs fieldName and conditionType");
+        }
+        ConditionOperator operator = ConditionOperator.from(rule.getConditionType());
+        if (operator == null) {
+            throw new IllegalArgumentException("Unsupported conditionType: " + rule.getConditionType());
+        }
+        if (operator != ConditionOperator.IS_NULL && operator != ConditionOperator.IS_NOT_NULL
+                && isBlank(rule.getConditionValue())) {
+            throw new IllegalArgumentException("A simple rule needs conditionValue for operator "
+                    + rule.getConditionType());
+        }
+    }
+
+    private void validateComplex(DataPermissionRule rule) {
+        if (rule.getItems() == null || rule.getItems().isEmpty()) {
+            throw new IllegalArgumentException("A complex rule needs at least one item");
+        }
+        int index = 0;
+        for (DataPermissionRuleItem item : rule.getItems()) {
+            index++;
+            if (item == null || isBlank(item.getLeftExpr()) || isBlank(item.getOperator())) {
+                throw new IllegalArgumentException("Complex item " + index + " needs leftExpr and operator");
+            }
+            ConditionOperator operator = ConditionOperator.from(item.getOperator());
+            if (operator == null) {
+                throw new IllegalArgumentException("Complex item " + index
+                        + " has an unsupported operator: " + item.getOperator());
+            }
+            if (operator == ConditionOperator.IS_NULL || operator == ConditionOperator.IS_NOT_NULL) {
+                continue;
+            }
+            RightValueType rightType = item.getRightType() == null
+                    ? RightValueType.CONST : item.getRightType();
+            if (rightType == RightValueType.NONE) {
+                throw new IllegalArgumentException("Complex item " + index
+                        + " cannot use rightType NONE with operator " + item.getOperator());
+            }
+            if (isBlank(item.getRightExpr())) {
+                throw new IllegalArgumentException("Complex item " + index + " needs rightExpr");
+            }
         }
     }
 
