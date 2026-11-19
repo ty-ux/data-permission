@@ -15,7 +15,7 @@
 依赖关系：
 
 - `data-permission-starter` 传递 `data-permission-core` 和 `data-permission-mybatis`
-- MyBatis 是 `provided` 作用域，由宿主项目的 `mybatis-spring-boot-starter` / RuoYi 自带依赖提供
+- MyBatis 是 `provided` 作用域，由宿主项目的 `mybatis-spring-boot-starter` / `mybatis-plus-boot-starter` / RuoYi 自带依赖提供
 - JSQLParser 已 shade 进 core，宿主无需也无法直接引用 `net.sf.jsqlparser`
 
 ## 2. 建表

@@ -35,7 +35,8 @@ import java.util.List;
 @ConditionalOnProperty(prefix = "data-permission", name = "enabled", havingValue = "true", matchIfMissing = true)
 @AutoConfigureAfter(name = {
         "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration",
-        "com.github.pagehelper.autoconfigure.PageHelperAutoConfiguration"
+        "com.github.pagehelper.autoconfigure.PageHelperAutoConfiguration",
+        "com.baomidou.mybatisplus.autoconfigure.MybatisPlusAutoConfiguration"
 })
 public class DataPermissionAutoConfiguration {
 

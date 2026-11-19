@@ -48,6 +48,10 @@ public class DataPermissionSqlSessionFactoryRegistrar implements InitializingBea
             if (configuration == null || !registered.add(configuration)) {
                 continue;
             }
+            if (configuration.getInterceptors().contains(interceptor)) {
+                log.info("[data-permission] interceptor already registered on SqlSessionFactory {}", factory);
+                continue;
+            }
             configuration.addInterceptor(interceptor);
             log.info("[data-permission] interceptor registered on SqlSessionFactory {}", factory);
         }

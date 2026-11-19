@@ -12,9 +12,12 @@ import com.ty.dp.core.subject.DataPermissionContext;
 import com.ty.dp.core.subject.DataPermissionSubject;
 import com.ty.dp.core.subject.DataPermissionSubjectProvider;
 import org.apache.ibatis.builder.StaticSqlSource;
+import org.apache.ibatis.cache.CacheKey;
 import org.apache.ibatis.executor.Executor;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
+import org.apache.ibatis.mapping.ParameterMapping;
+import org.apache.ibatis.mapping.ParameterMode;
 import org.apache.ibatis.mapping.SqlCommandType;
 import org.apache.ibatis.mapping.SqlSource;
 import org.apache.ibatis.plugin.Interceptor;
@@ -22,8 +25,11 @@ import org.apache.ibatis.plugin.Intercepts;
 import org.apache.ibatis.plugin.Invocation;
 import org.apache.ibatis.plugin.Plugin;
 import org.apache.ibatis.plugin.Signature;
+import org.apache.ibatis.reflection.MetaObject;
+import org.apache.ibatis.session.Configuration;
 import org.apache.ibatis.session.ResultHandler;
 import org.apache.ibatis.session.RowBounds;
+import org.apache.ibatis.type.TypeHandlerRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,7 +52,10 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Intercepts({
         @Signature(type = Executor.class, method = "query",
-                args = {MappedStatement.class, Object.class, RowBounds.class, ResultHandler.class})
+                args = {MappedStatement.class, Object.class, RowBounds.class, ResultHandler.class}),
+        @Signature(type = Executor.class, method = "query",
+                args = {MappedStatement.class, Object.class, RowBounds.class, ResultHandler.class,
+                        CacheKey.class, BoundSql.class})
 })
 public class DataPermissionInterceptor implements Interceptor {
 
@@ -85,6 +94,9 @@ public class DataPermissionInterceptor implements Interceptor {
         }
 
         BoundSql boundSql = statement.getBoundSql(parameter);
+        if (args.length == 6 && args[5] instanceof BoundSql) {
+            boundSql = (BoundSql) args[5];
+        }
         String sql = boundSql.getSql();
         if (sql == null || sql.trim().isEmpty() || sql.contains(SqlMarkers.MARKER)) {
             return invocation.proceed();
@@ -155,8 +167,61 @@ public class DataPermissionInterceptor implements Interceptor {
 
         SqlSource sqlSource = new StaticSqlSource(statement.getConfiguration(), rewritten,
                 boundSql.getParameterMappings());
-        invocation.getArgs()[0] = copyWithSqlSource(statement, sqlSource);
+        Object[] args = invocation.getArgs();
+        MappedStatement rewrittenStatement = copyWithSqlSource(statement, sqlSource);
+        args[0] = rewrittenStatement;
+        if (args.length == 6) {
+            BoundSql rewrittenBoundSql = new BoundSql(statement.getConfiguration(), rewritten,
+                    boundSql.getParameterMappings(), boundSql.getParameterObject());
+            for (Map.Entry<String, Object> entry : boundSql.getAdditionalParameters().entrySet()) {
+                rewrittenBoundSql.setAdditionalParameter(entry.getKey(), entry.getValue());
+            }
+            args[5] = rewrittenBoundSql;
+            if (args[4] instanceof CacheKey) {
+                // The caller (MyBatis-Plus, PageHelper, ...) computed the key from the
+                // un-rewritten SQL. Rebuild it so the first-level/second-level cache
+                // cannot return rows fetched under a different permission rule.
+                args[4] = createCacheKey(rewrittenStatement, args[1], (RowBounds) args[2], rewrittenBoundSql);
+            }
+        }
         return invocation.proceed();
+    }
+
+    /**
+     * Mirrors {@code BaseExecutor.createCacheKey}; the executor's own method is
+     * not reachable from a plugin.
+     */
+    private static CacheKey createCacheKey(MappedStatement statement, Object parameterObject,
+                                           RowBounds rowBounds, BoundSql boundSql) {
+        CacheKey cacheKey = new CacheKey();
+        cacheKey.update(statement.getId());
+        cacheKey.update(rowBounds.getOffset());
+        cacheKey.update(rowBounds.getLimit());
+        cacheKey.update(boundSql.getSql());
+        Configuration configuration = statement.getConfiguration();
+        TypeHandlerRegistry typeHandlerRegistry = configuration.getTypeHandlerRegistry();
+        for (ParameterMapping parameterMapping : boundSql.getParameterMappings()) {
+            if (parameterMapping.getMode() == ParameterMode.OUT) {
+                continue;
+            }
+            String propertyName = parameterMapping.getProperty();
+            Object value;
+            if (boundSql.hasAdditionalParameter(propertyName)) {
+                value = boundSql.getAdditionalParameter(propertyName);
+            } else if (parameterObject == null) {
+                value = null;
+            } else if (typeHandlerRegistry.hasTypeHandler(parameterObject.getClass())) {
+                value = parameterObject;
+            } else {
+                MetaObject metaObject = configuration.newMetaObject(parameterObject);
+                value = metaObject.getValue(propertyName);
+            }
+            cacheKey.update(value);
+        }
+        if (configuration.getEnvironment() != null) {
+            cacheKey.update(configuration.getEnvironment().getId());
+        }
+        return cacheKey;
     }
 
     private MappedStatement copyWithSqlSource(MappedStatement source, SqlSource sqlSource) {

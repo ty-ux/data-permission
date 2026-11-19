@@ -13,7 +13,7 @@ spring:
       schema-locations: classpath:db/schema-h2.sql
       data-locations: classpath:db/data-h2.sql
 
-mybatis:
+mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
 

@@ -138,7 +138,7 @@ values ('rr-dept', '2', 'r-dept', '0');
 mvn -B -ntp verify
 ```
 
-示例模块使用 H2 内存库，覆盖简单规则、复杂规则、超级管理员、无规则拒绝、`@DataPermissionIgnore`、PageHelper 分页计数和 `LOG_ONLY` 模式。
+示例模块使用 H2 内存库，覆盖简单规则、复杂规则、超级管理员、无规则拒绝、`@DataPermissionIgnore`、PageHelper 分页计数、MyBatis-Plus `BaseMapper` 查询与分页计数、规则变更后的缓存刷新和 `LOG_ONLY` 模式。
 
 ## CI/CD
 
@@ -154,7 +154,9 @@ git push origin v0.1.0
 
 - Java 8+（字节码目标 8）
 - Spring Boot 2.x（`javax.servlet`）
-- MyBatis 3.5.x；PageHelper 已通过集成测试，MyBatis-Plus 同样基于 MyBatis `Interceptor`，设计上可共存（本仓库未覆盖 MP 场景）
+- MyBatis 3.5.x；PageHelper 已通过集成测试
+- MyBatis-Plus 3.5.7（分支 `feature/mybatis-plus`）：拦截器同时覆盖 4 参数和 6 参数 `Executor.query`，并按重写后的 SQL 重建缓存 key，避免命中旧权限结果；与 PageHelper 共存时，示例在启动类排除原生 `MybatisAutoConfiguration`，只保留 MP 的 `SqlSessionFactory`
+- JDK 17：分支 `feature/jdk17` 以 Java 17 编译和运行，仍保持 Spring Boot 2.7 / `javax.servlet`，可直接接入 RuoYi
 - 仅拦截 `SELECT`，且仅处理标注了 `@DataPermission` 的 Mapper 方法
 - 管理页面：Vue 2 + Element UI 2.15（RuoYi-Vue 技术栈），不依赖 RuoYi 全局组件；Vue 3（RuoYi-Vue-Plus）需迁移组件语法
 
