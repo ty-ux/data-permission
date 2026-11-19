@@ -14,7 +14,7 @@
 - **宿主无侵入**：通过反射适配 Spring Security principal（RuoYi `LoginUser` 开箱可用），不依赖宿主实体类；自定义认证体系只需提供一个 `DataPermissionSubjectProvider`。
 - **注解驱动**：只有标注 `@DataPermission` 的 Mapper 方法才会被处理，未注解的查询保持原样。
 - **依赖隔离**：JSQLParser 4.6 被 shade 到 `com.ty.dp.shaded.jsqlparser`，不会与宿主已有的 JSQLParser 版本冲突。
-- **Java 8 字节码**，Spring Boot 2.7.x / MyBatis 3.5.x 验证通过。
+- **Java 17 字节码**，Spring Boot 2.7.x / MyBatis 3.5.x 验证通过（`main` 分支保持 Java 8）。
 
 ## 模块
 
@@ -23,7 +23,7 @@
 | `data-permission-core` | 规则模型、SQL 改写、Subject 抽象、SPI，不依赖 Spring |
 | `data-permission-mybatis` | MyBatis 拦截器、`@DataPermission` / `@DataPermissionIgnore` |
 | `data-permission-starter` | Spring Boot 自动装配、JDBC 规则仓库、缓存、管理 API、建表脚本 |
-| `data-permission-sample` | H2 示例与 7 个集成测试 |
+| `data-permission-sample` | H2 示例与 45 个测试用例 |
 | `data-permission-ui` | RuoYi-Vue（Vue 2 + Element UI）规则管理页面，可复制进宿主前端 |
 
 ## 快速开始
@@ -142,7 +142,7 @@ mvn -B -ntp verify
 
 ## CI/CD
 
-- `ci.yml`：push / PR 时在 Java 8 和 17 上执行后端构建与测试，同时执行管理页面的 `npm run build`。
+- `ci.yml`：push / PR 时在 Java 17 上执行后端构建与测试，同时执行管理页面的 `npm run build`。
 - `release.yml`：推送 `v*` 标签时，把版本改为标签版本、构建、发布到 GitHub Packages，并创建 GitHub Release 附带三个模块的 jar。
 
 ```bash
@@ -152,11 +152,11 @@ git push origin v0.1.0
 
 ## 兼容性
 
-- Java 8+（字节码目标 8）
-- Spring Boot 2.x（`javax.servlet`）
+- Java 17（字节码目标 17；`main` 分支保持 Java 8 + `release 8`）
+- Spring Boot 2.7.x（`javax.servlet`），可直接运行在 JDK 17 的 RuoYi 宿主
 - MyBatis 3.5.x；PageHelper 已通过集成测试
-- MyBatis-Plus 3.5.7（分支 `feature/mybatis-plus`）：拦截器同时覆盖 4 参数和 6 参数 `Executor.query`，并按重写后的 SQL 重建缓存 key，避免命中旧权限结果；与 PageHelper 共存时，示例在启动类排除原生 `MybatisAutoConfiguration`，只保留 MP 的 `SqlSessionFactory`
-- JDK 17：分支 `feature/jdk17` 以 Java 17 编译和运行，仍保持 Spring Boot 2.7 / `javax.servlet`，可直接接入 RuoYi
+- MyBatis-Plus 3.5.7（本分支）：拦截器同时覆盖 4 参数和 6 参数 `Executor.query`，并按重写后的 SQL 重建缓存 key，避免命中旧权限结果；与 PageHelper 共存时，示例在启动类排除原生 `MybatisAutoConfiguration`，只保留 MP 的 `SqlSessionFactory`
+- 单能力分支：`feature/jdk17`（仅 Java 17，原生 MyBatis）、`feature/mybatis-plus`（仅 MyBatis-Plus，Java 8）；本分支 `feature/jdk17-mybatis-plus` 同时包含两者
 - 仅拦截 `SELECT`，且仅处理标注了 `@DataPermission` 的 Mapper 方法
 - 管理页面：Vue 2 + Element UI 2.15（RuoYi-Vue 技术栈），不依赖 RuoYi 全局组件；Vue 3（RuoYi-Vue-Plus）需迁移组件语法
 
