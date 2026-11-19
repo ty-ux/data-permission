@@ -5,10 +5,12 @@
     width="960px"
     append-to-body
     :close-on-click-modal="false"
+    :show-close="!submitting"
+    :before-close="handleClose"
     @closed="reset"
   >
     <div v-loading="loading">
-      <el-form ref="ruleForm" :model="form" :rules="rules" label-width="96px" size="small">
+      <el-form ref="ruleForm" :model="form" :rules="rules" label-width="96px" size="small" :disabled="submitting">
         <el-row :gutter="16">
           <el-col :span="12">
             <el-form-item label="规则名称" prop="ruleName">
@@ -33,17 +35,25 @@
               </el-radio-group>
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :span="6">
             <el-form-item label="优先级" prop="priority">
               <el-input-number v-model="form.priority" :min="0" :max="9999" controls-position="right" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :span="6">
             <el-form-item label="排序" prop="sortOrder">
               <el-input-number v-model="form.sortOrder" :min="0" :max="9999" controls-position="right" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :span="6">
+            <el-form-item label="组合方式" prop="logicOperator">
+              <el-select v-model="form.logicOperator" style="width: 100%">
+                <el-option label="AND（与上一条）" value="AND" />
+                <el-option label="OR（或上一条）" value="OR" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="6">
             <el-form-item label="启用" prop="enabled">
               <el-switch v-model="form.enabled" />
             </el-form-item>
@@ -104,7 +114,7 @@
             </el-table-column>
             <el-table-column label="左字段" min-width="125">
               <template slot-scope="scope">
-                <el-input v-model="scope.row.leftExpr" size="mini" placeholder="dept_id" />
+                <el-input v-model="scope.row.leftExpr" size="mini" maxlength="255" placeholder="dept_id" />
               </template>
             </el-table-column>
             <el-table-column label="操作符" width="110">
@@ -123,16 +133,16 @@
             </el-table-column>
             <el-table-column label="右值" min-width="125">
               <template slot-scope="scope">
-                <el-input v-model="scope.row.rightExpr" size="mini" placeholder="deptId 或 100" />
+                <el-input v-model="scope.row.rightExpr" size="mini" maxlength="255" placeholder="deptId 或 100" />
               </template>
             </el-table-column>
             <el-table-column label="操作" width="60" align="center" fixed="right">
               <template slot-scope="scope">
-                <el-button type="text" icon="el-icon-delete" size="mini" @click="removeItem(scope.$index)" />
+                <el-button type="text" icon="el-icon-delete" size="mini" :disabled="submitting" @click="removeItem(scope.$index)" />
               </template>
             </el-table-column>
           </el-table>
-          <el-button type="primary" plain icon="el-icon-plus" size="mini" class="dp-add-item" @click="addItem">
+          <el-button type="primary" plain icon="el-icon-plus" size="mini" class="dp-add-item" :disabled="submitting" @click="addItem">
             添加明细
           </el-button>
           <div class="dp-hint">
@@ -146,7 +156,7 @@
       </el-form>
     </div>
     <span slot="footer" class="dialog-footer">
-      <el-button @click="visible = false">取消</el-button>
+      <el-button :disabled="submitting" @click="visible = false">取消</el-button>
       <el-button type="primary" :loading="submitting" @click="submit">保存</el-button>
     </span>
   </el-dialog>
@@ -162,6 +172,7 @@ export default {
       visible: false,
       loading: false,
       submitting: false,
+      session: 0,
       form: this.blankForm(),
       operatorOptions: [
         { label: '=', value: '=' },
@@ -190,6 +201,7 @@ export default {
   },
   methods: {
     open(ruleId) {
+      const token = ++this.session
       this.visible = true
       this.form = this.blankForm()
       this.$nextTick(() => {
@@ -198,21 +210,38 @@ export default {
         }
       })
       if (!ruleId) {
+        this.loading = false
         return
       }
       this.loading = true
       getRule(ruleId)
         .then(res => {
-          if (res) {
-            this.form = this.normalize(res)
+          if (token !== this.session) {
+            return
           }
+          if (!res) {
+            this.$message.error('规则不存在或已被删除')
+            this.visible = false
+            return
+          }
+          this.form = this.normalize(res)
         })
         .catch(() => {
-          this.visible = false
+          if (token === this.session) {
+            this.visible = false
+          }
         })
         .finally(() => {
-          this.loading = false
+          if (token === this.session) {
+            this.loading = false
+          }
         })
+    },
+    handleClose(done) {
+      if (this.submitting) {
+        return
+      }
+      done()
     },
     blankForm() {
       return {
@@ -252,14 +281,17 @@ export default {
       form.logicOperator = rule.logicOperator === 'OR' ? 'OR' : 'AND'
       form.priority = Number(rule.priority || 0)
       form.sortOrder = Number(rule.sortOrder || 0)
-      form.items = (rule.items || []).map((item, index) => Object.assign(this.blankItem(index), item, {
-        groupNo: Number(item.groupNo || 1),
-        subGroupNo: Number(item.subGroupNo || 1),
-        sortOrder: Number(item.sortOrder === null || item.sortOrder === undefined ? index : item.sortOrder),
-        logicOperator: item.logicOperator === 'OR' ? 'OR' : 'AND',
-        leftType: item.leftType || 'FIELD',
-        rightType: item.rightType || 'CONST'
-      }))
+      form.items = (rule.items || []).map((item, index) => {
+        const noRightValue = item.operator === 'IS_NULL' || item.operator === 'IS_NOT_NULL'
+        return Object.assign(this.blankItem(index), item, {
+          groupNo: Number(item.groupNo || 1),
+          subGroupNo: Number(item.subGroupNo || 1),
+          sortOrder: Number(item.sortOrder === null || item.sortOrder === undefined ? index : item.sortOrder),
+          logicOperator: item.logicOperator === 'OR' ? 'OR' : 'AND',
+          leftType: item.leftType || 'FIELD',
+          rightType: noRightValue ? 'NONE' : (item.rightType || 'CONST')
+        })
+      })
       return form
     },
     addItem() {
@@ -268,12 +300,29 @@ export default {
     removeItem(index) {
       this.form.items.splice(index, 1)
     },
+    trimForm() {
+      const form = this.form
+      form.ruleName = (form.ruleName || '').trim()
+      form.appPoint = (form.appPoint || '').trim()
+      form.tableName = (form.tableName || '').trim()
+      form.fieldName = (form.fieldName || '').trim()
+      form.description = (form.description || '').trim()
+      form.items.forEach(item => {
+        item.leftExpr = (item.leftExpr || '').trim()
+        item.rightExpr = (item.rightExpr || '').trim()
+      })
+    },
     reset() {
       this.form = this.blankForm()
       this.loading = false
       this.submitting = false
     },
     submit() {
+      if (this.submitting) {
+        return
+      }
+      const token = this.session
+      this.trimForm()
       this.$refs.ruleForm.validate(valid => {
         if (!valid) {
           return
@@ -281,6 +330,11 @@ export default {
         if (this.form.ruleMode === 'SIMPLE') {
           if (!this.form.fieldName || !this.form.conditionType) {
             this.$message.error('简单规则需要填写过滤字段和操作符')
+            return
+          }
+          const noRightValue = this.form.conditionType === 'IS_NULL' || this.form.conditionType === 'IS_NOT_NULL'
+          if (!noRightValue && !String(this.form.conditionValue || '').trim()) {
+            this.$message.error('简单规则需要填写条件值')
             return
           }
         } else {
@@ -293,6 +347,23 @@ export default {
             this.$message.error('第 ' + (badIndex + 1) + ' 条明细缺少左字段或操作符')
             return
           }
+          const noRightValue = item => item.operator === 'IS_NULL' || item.operator === 'IS_NOT_NULL'
+          const noneIndex = this.form.items.findIndex(item => !noRightValue(item) && (!item.rightType || item.rightType === 'NONE'))
+          if (noneIndex >= 0) {
+            this.$message.error('第 ' + (noneIndex + 1) + ' 条明细的右值类型不能为“无”')
+            return
+          }
+          const emptyRightIndex = this.form.items.findIndex(item => !noRightValue(item) && !item.rightExpr)
+          if (emptyRightIndex >= 0) {
+            this.$message.error('第 ' + (emptyRightIndex + 1) + ' 条明细缺少右值')
+            return
+          }
+          this.form.items.forEach(item => {
+            if (noRightValue(item)) {
+              item.rightType = 'NONE'
+              item.rightExpr = ''
+            }
+          })
         }
         this.submitting = true
         const payload = JSON.parse(JSON.stringify(this.form))
@@ -305,13 +376,18 @@ export default {
         }
         saveRule(payload)
           .then(() => {
+            if (token !== this.session) {
+              return
+            }
             this.$message.success('保存成功')
             this.visible = false
             this.$emit('saved')
           })
           .catch(() => {})
           .finally(() => {
-            this.submitting = false
+            if (token === this.session) {
+              this.submitting = false
+            }
           })
       })
     }

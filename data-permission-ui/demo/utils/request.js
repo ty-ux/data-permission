@@ -116,10 +116,12 @@ let roleRules = {
 let sequence = 10
 
 function matchRule(rule, params) {
-  if (params.appPoint && (rule.appPoint || '').indexOf(params.appPoint) < 0) {
+  const appPoint = String(params.appPoint || '').trim().toLowerCase()
+  if (appPoint && (rule.appPoint || '').trim().toLowerCase() !== appPoint) {
     return false
   }
-  if (params.ruleName && (rule.ruleName || '').indexOf(params.ruleName) < 0) {
+  const ruleName = String(params.ruleName || '').trim().toLowerCase()
+  if (ruleName && (rule.ruleName || '').toLowerCase().indexOf(ruleName) < 0) {
     return false
   }
   return true
@@ -169,6 +171,9 @@ export default function request(config) {
   if (rulePath && method === 'delete') {
     const ids = decodeURIComponent(rulePath[1]).split(',')
     rules = rules.filter(rule => ids.indexOf(rule.id) < 0)
+    Object.keys(roleRules).forEach(roleId => {
+      roleRules[roleId] = roleRules[roleId].filter(id => ids.indexOf(id) < 0)
+    })
     return delay({ status: 'ok' })
   }
 

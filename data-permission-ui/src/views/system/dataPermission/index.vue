@@ -62,6 +62,18 @@
         <template slot-scope="scope">{{ describeRule(scope.row) }}</template>
       </el-table-column>
       <el-table-column label="优先级" prop="priority" width="80" align="center" />
+      <el-table-column width="80" align="center">
+        <template slot="header">
+          <el-tooltip content="与同表的上一条规则组合，首条规则忽略该值" placement="top">
+            <span>组合</span>
+          </el-tooltip>
+        </template>
+        <template slot-scope="scope">
+          <el-tag size="small" :type="scope.row.logicOperator === 'OR' ? 'warning' : 'info'">
+            {{ scope.row.logicOperator === 'OR' ? 'OR' : 'AND' }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="状态" width="80" align="center">
         <template slot-scope="scope">
           <el-tag size="small" :type="scope.row.enabled ? 'success' : 'info'">
@@ -126,7 +138,8 @@ export default {
         ruleName: ''
       },
       pageNum: 1,
-      pageSize: 10
+      pageSize: 10,
+      requestSeq: 0
     }
   },
   computed: {
@@ -140,9 +153,13 @@ export default {
   },
   methods: {
     getList() {
+      const seq = ++this.requestSeq
       this.loading = true
       listRules(this.queryParams)
         .then(res => {
+          if (seq !== this.requestSeq) {
+            return
+          }
           this.ruleList = res || []
           const maxPage = Math.max(1, Math.ceil(this.ruleList.length / this.pageSize))
           if (this.pageNum > maxPage) {
@@ -151,7 +168,9 @@ export default {
         })
         .catch(() => {})
         .finally(() => {
-          this.loading = false
+          if (seq === this.requestSeq) {
+            this.loading = false
+          }
         })
     },
     handleQuery() {
@@ -170,8 +189,9 @@ export default {
       this.$refs.ruleDialog.open(row.id)
     },
     handleDelete(row) {
-      this.$confirm('确认删除规则「' + (row.ruleName || row.id) + '」？', '提示', {
-        confirmButtonText: '确认',
+      const name = row.ruleName || row.id
+      this.$confirm('确认删除规则「' + name + '」？删除后该规则会从所有角色解绑；若角色因此没有可用的启用规则，将看不到受管数据表的数据。', '提示', {
+        confirmButtonText: '确认删除',
         cancelButtonText: '取消',
         type: 'warning'
       })
