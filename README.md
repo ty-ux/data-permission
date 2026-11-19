@@ -24,6 +24,7 @@
 | `data-permission-mybatis` | MyBatis 拦截器、`@DataPermission` / `@DataPermissionIgnore` |
 | `data-permission-starter` | Spring Boot 自动装配、JDBC 规则仓库、缓存、管理 API、建表脚本 |
 | `data-permission-sample` | H2 示例与 7 个集成测试 |
+| `data-permission-ui` | RuoYi-Vue（Vue 2 + Element UI）规则管理页面，可复制进宿主前端 |
 
 ## 快速开始
 
@@ -112,6 +113,7 @@ values ('rr-dept', '2', 'r-dept', '0');
 
 - [接入指南（RuoYi / Spring Security / 定时任务 / 灰度上线）](docs/integration.md)
 - [规则语义与 SQL 改写规则](docs/rule-semantics.md)
+- [管理页面接入（Vue 2 + Element UI）](data-permission-ui/README.md)
 
 ## 管理接口
 
@@ -128,6 +130,8 @@ values ('rr-dept', '2', 'r-dept', '0');
 
 接口本身不做鉴权，**启用前必须由宿主项目在网关或 Spring Security 中限制访问**，并在规则变更后调用缓存的失效逻辑（管理 API 已自动失效当前实例）。
 
+仓库内的 [`data-permission-ui`](data-permission-ui/README.md) 提供可直接复制进 RuoYi-Vue 的管理页面：规则列表、简单/复杂规则编辑、角色规则分配，并带一个本地 Mock 演示，方便不接后端先看交互。
+
 ## 构建与测试
 
 ```bash
@@ -138,7 +142,7 @@ mvn -B -ntp verify
 
 ## CI/CD
 
-- `ci.yml`：push / PR 时在 Java 8 和 17 上执行完整构建与测试。
+- `ci.yml`：push / PR 时在 Java 8 和 17 上执行后端构建与测试，同时执行管理页面的 `npm run build`。
 - `release.yml`：推送 `v*` 标签时，把版本改为标签版本、构建、发布到 GitHub Packages，并创建 GitHub Release 附带三个模块的 jar。
 
 ```bash
@@ -152,6 +156,7 @@ git push origin v0.1.0
 - Spring Boot 2.x（`javax.servlet`）
 - MyBatis 3.5.x；PageHelper 已通过集成测试，MyBatis-Plus 同样基于 MyBatis `Interceptor`，设计上可共存（本仓库未覆盖 MP 场景）
 - 仅拦截 `SELECT`，且仅处理标注了 `@DataPermission` 的 Mapper 方法
+- 管理页面：Vue 2 + Element UI 2.15（RuoYi-Vue 技术栈），不依赖 RuoYi 全局组件；Vue 3（RuoYi-Vue-Plus）需迁移组件语法
 
 ## License
 

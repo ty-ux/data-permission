@@ -22,13 +22,6 @@
 
 执行 [`schema-mysql.sql`](../data-permission-starter/src/main/resources/db/schema-mysql.sql)。
 
-如果是从 SRM 已有的三张表迁移，先执行 [`schema-mysql-upgrade-from-srm.sql`](../data-permission-starter/src/main/resources/db/schema-mysql-upgrade-from-srm.sql)：
-
-- `sys_permission_rule` 增加 `app_point`、`priority`、`enabled`
-- `sys_role_permission_rule.role_id` 改为 `VARCHAR(64)`
-
-已有规则默认 `app_point = NULL`（对所有应用点生效）、`enabled = 1`，不需要重新配置。
-
 > 正式库 MySQL 若开启了 GTID，请避免 `CREATE TABLE ... AS SELECT`，建表与数据迁移分开执行。
 
 ## 3. 配置
@@ -211,19 +204,3 @@ RuoYi 自带的 `@DataScope` 是在 Service 层拼接 `params.dataScope`，依�
 | 复杂规则结果不符 | `group_no` 组间 OR、`sub_group_no` 子组间 AND；明细的 `logic_operator` 从第二条开始生效 |
 | 定时任务被过滤/报错 | 检查 `no-subject-policy`；任务内是否需要 `runAs` / `without` |
 | 解析异常 | 用 `LOG_ONLY` 找到具体 SQL；必要时 `@DataPermissionIgnore` 豁免 |
-
-## 12. 从 SRM 模块迁移
-
-原 SRM 实现与本项目的主要差异：
-
-| 维度 | SRM `by-data-rule` | 本项目 |
-| --- | --- | --- |
-| 依赖 | MyBatis-Plus `InnerInterceptor` | 原生 MyBatis `Interceptor` |
-| 注解位置 | 扫描调用栈 | Mapper 方法 / 接口 |
-| 无规则 | 放行全部 | 默认拒绝（可配置） |
-| 解析失败 | 吞异常、执行原 SQL | `ENFORCE` 拒绝；`LOG_ONLY` 记录 |
-| 值解析失败 | 丢弃条件（扩大范围） | `1 = 0`（fail-closed） |
-| 用户耦合 | 依赖 `LoginUser` | `DataPermissionSubject` SPI + 反射适配 |
-| 前端 | 内置 Vue 页面 | 提供 REST API，UI 由宿主实现 |
-
-迁移时先执行升级脚本，再把原 `@DataPermission` 注解从 Service/Controller 移到 Mapper 接口。规则数据可以原样保留。
