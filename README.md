@@ -142,7 +142,7 @@ mvn -B -ntp verify
 
 ## CI/CD
 
-- `ci.yml`：push / PR 时在 Java 8 和 17 上执行后端构建与测试，同时执行管理页面的 `npm run build`。
+- `ci.yml`：push / PR 时在 Java 17 上执行后端构建与测试，同时执行管理页面的 `npm run build`。
 - `release.yml`：推送 `v*` 标签时，把版本改为标签版本、构建、发布到 GitHub Packages，并创建 GitHub Release 附带三个模块的 jar。
 
 ```bash
@@ -152,8 +152,8 @@ git push origin v0.1.0
 
 ## 兼容性
 
-- Java 8+（字节码目标 8）
-- Spring Boot 2.x（`javax.servlet`）
+- Java 17（字节码目标 17；`main` 分支保持 Java 8 + `release 8`）
+- Spring Boot 2.7.x（`javax.servlet`），可直接运行在 JDK 17 的 RuoYi 宿主
 - MyBatis 3.5.x；PageHelper 已通过集成测试，MyBatis-Plus 同样基于 MyBatis `Interceptor`，设计上可共存（本仓库未覆盖 MP 场景）
 - 仅拦截 `SELECT`，且仅处理标注了 `@DataPermission` 的 Mapper 方法
 - 管理页面：Vue 2 + Element UI 2.15（RuoYi-Vue 技术栈），不依赖 RuoYi 全局组件；Vue 3（RuoYi-Vue-Plus）需迁移组件语法
