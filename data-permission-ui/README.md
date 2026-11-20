@@ -94,5 +94,5 @@ npm run build
 
 - 页面兼容 Vue 2.6+ 与 Element UI 2.15（RuoYi-Vue 2.6.12 已验证页面语法）；本地 demo 的构建工具链使用 Vue 2.7
 - 接口前缀与后端 `data-permission.admin.path` 保持一致，默认 `/data-permission/admin`
-- 若接入 RuoYi-Vue-Plus（Vue 3 + Element Plus），需要把 `el-*` 组件、`slot-scope` 和事件写法迁移到 Vue 3 语法
+- 若接入 RuoYi-Vue-Plus（Vue 3 + Element Plus），直接使用 [`../data-permission-ui-vue3`](../data-permission-ui-vue3/README.md)，页面已按 Vue 3 / Element Plus 语法重写
 - 页面不做分页请求，列表接口返回全部匹配规则后在浏览器端分页；规则数量较大时建议给后端接口加分页参数

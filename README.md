@@ -23,8 +23,9 @@
 | `data-permission-core` | 规则模型、SQL 改写、Subject 抽象、SPI，不依赖 Spring |
 | `data-permission-mybatis` | MyBatis 拦截器、`@DataPermission` / `@DataPermissionIgnore` |
 | `data-permission-starter` | Spring Boot 自动装配、JDBC 规则仓库、缓存、管理 API、建表脚本 |
-| `data-permission-sample` | H2 示例与 7 个集成测试 |
+| `data-permission-sample` | H2 示例与 39 个测试用例 |
 | `data-permission-ui` | RuoYi-Vue（Vue 2 + Element UI）规则管理页面，可复制进宿主前端 |
+| `data-permission-ui-vue3` | RuoYi-Vue-Plus（Vue 3 + Element Plus）规则管理页面示例 |
 
 ## 快速开始
 
@@ -130,7 +131,7 @@ values ('rr-dept', '2', 'r-dept', '0');
 
 接口本身不做鉴权，**启用前必须由宿主项目在网关或 Spring Security 中限制访问**，并在规则变更后调用缓存的失效逻辑（管理 API 已自动失效当前实例）。
 
-仓库内的 [`data-permission-ui`](data-permission-ui/README.md) 提供可直接复制进 RuoYi-Vue 的管理页面：规则列表、简单/复杂规则编辑、角色规则分配，并带一个本地 Mock 演示，方便不接后端先看交互。
+仓库内提供两套可直接复制进宿主前端的管理页面： [`data-permission-ui`](data-permission-ui/README.md)（RuoYi-Vue，Vue 2 + Element UI）和 [`data-permission-ui-vue3`](data-permission-ui-vue3/README.md)（RuoYi-Vue-Plus，Vue 3 + Element Plus）。两者都包含规则列表、简单/复杂规则编辑、角色规则分配，并带本地 Mock 演示。
 
 ## 构建与测试
 
@@ -142,7 +143,7 @@ mvn -B -ntp verify
 
 ## CI/CD
 
-- `ci.yml`：push / PR 时在 Java 8 和 17 上执行后端构建与测试，同时执行管理页面的 `npm run build`。
+- `ci.yml`：push / PR 时在 Java 8 和 17 上执行后端构建与测试，同时分别构建 Vue 2 与 Vue 3 管理页面。
 - `release.yml`：推送 `v*` 标签时，把版本改为标签版本、构建、发布到 GitHub Packages，并创建 GitHub Release 附带三个模块的 jar。
 
 ```bash
