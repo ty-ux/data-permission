@@ -79,11 +79,15 @@ public class DataPermissionAutoConfiguration {
         return new DataPermissionSqlSessionFactoryRegistrar(sqlSessionFactories, interceptor);
     }
 
-    @Bean
-    @ConditionalOnMissingBean
+    @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(name = {"org.springframework.web.filter.OncePerRequestFilter", "javax.servlet.Filter"})
-    public DataPermissionContextFilter dataPermissionContextFilter(DataPermissionSubjectProvider subjectProvider) {
-        return new DataPermissionContextFilter(subjectProvider);
+    static class ServletFilterConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        public DataPermissionContextFilter dataPermissionContextFilter(DataPermissionSubjectProvider subjectProvider) {
+            return new DataPermissionContextFilter(subjectProvider);
+        }
     }
 
     @Configuration
