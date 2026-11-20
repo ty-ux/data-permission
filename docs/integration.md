@@ -100,13 +100,17 @@ public interface ProjectMapper extends BaseMapper<Project> {
 @DataPermission(appPoint = "project", tableAlias = {"project:p"})
 ```
 
+`tableAlias` 只在该表于查询中确实使用这个别名时生效：引擎会把配置的别名与解析到的别名比较，一致才覆盖；表没有别名或别名不一致时保留实际限定符并记录 warn 日志。这样可以避免在 CTE 体内生成不存在的别名，或把条件误绑到同作用域另一张表的别名上。
+
 `tableAlias` 只适用于该表在查询中只有一个实例的场景。如果同一张表自连接，引擎会为每个别名实例分别附加条件，规则字段会按实例展开（字段 `dept_id` 会分别生成 `a.dept_id = ...` 和 `b.dept_id = ...`）；此时不要用 `tableAlias` 指定单个别名，否则 `ENFORCE` 模式会拒绝查询。
 
 ### 多表与子查询
 
 一条 SQL 中出现的每张受保护表都会各自附加条件，表与表之间是 `AND`。引擎按查询作用域遍历 `FROM` / `JOIN`、`SELECT` 列、`WHERE`、`HAVING`、`GROUP BY`、`ORDER BY`、`LIMIT`/`OFFSET` 以及 CTE 和子查询，分别改写每个作用域里的受保护表；子查询中的表使用自己的别名，不会与外层同名别名串用。
 
-CTE 的名称按 SQL 作用域可见性处理：非递归 CTE 自己的名字在其查询体内不可见，前面的 CTE 对后面的 CTE 可见，主查询可见全部 CTE；带 schema 的物理表即使与 CTE 同名，仍按物理表过滤。外层物理表没有命中规则时，即使内层子查询已经改写，外层仍按默认拒绝处理。
+CTE 的名称按 SQL 作用域可见性处理：非递归 CTE 自己的名字在其查询体内不可见，前面的 CTE 对后面的 CTE 可见，主查询可见全部 CTE；带 schema、库名或 DBLink 的物理表（`public.project`、`db..project`、`project@link`）即使与 CTE 同名，仍按物理表过滤。外层物理表没有命中规则时，即使内层子查询已经改写，外层仍按默认拒绝处理。
+
+默认拒绝按作用域生效：同一作用域内只要有一张表命中规则，其他未配规则的表不会单独追加 `1 = 0`；子查询或 CTE 体的作用域独立判断，其中没有任何命中规则且含物理表时会被整体拒绝。没有物理表的作用域（常量 CTE、`VALUES`、`SELECT 1`）不会被拒绝；`FROM` 表函数无法过滤返回行，默认拒绝下仍会被拒绝。
 
 对于暂时无法安全解析的结构，`ENFORCE` 模式会拒绝执行；`LOG_ONLY` 模式记录错误并执行原 SQL。上线前仍建议用 `LOG_ONLY` 扫一遍复杂 SQL。
 

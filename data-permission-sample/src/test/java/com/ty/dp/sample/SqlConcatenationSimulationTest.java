@@ -23,6 +23,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -279,6 +281,258 @@ class SqlConcatenationSimulationTest {
     }
 
     @Test
+    void constantCteBodyIsNotDenied() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Long.valueOf(101L), mapper.selectConstantCte());
+    }
+
+    @Test
+    void recursiveConstantAnchorIsNotDenied() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Arrays.asList(1L, 2L, 3L), mapper.selectRecursiveConstantAnchor());
+    }
+
+    @Test
+    void tableFreeSelectIsNotDenied() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Integer.valueOf(1), mapper.selectConstant());
+    }
+
+    @Test
+    void valuesFromItemIsNotDenied() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Arrays.asList(1, 2), mapper.selectValuesFromItem());
+    }
+
+    @Test
+    void valuesFromItemSubqueryIsFiltered() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        String sql = SqlConditionBuilder.apply(
+                "select * from (values ((select count(*) from sim_project))) v",
+                Collections.singletonList(rule), Collections.emptyMap(), null, null, true);
+
+        assertTrue(sql.contains("FROM sim_project WHERE"));
+        assertTrue(sql.contains("sim_project.dept_id = '100'"));
+        assertFalse(sql.contains("1 = 0"));
+    }
+
+    @Test
+    void tableFunctionIsDeniedUnderTheDefaultPolicy() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        String sql = SqlConditionBuilder.apply(
+                "select * from my_func(1)",
+                Collections.singletonList(rule), Collections.emptyMap(), null, null, true);
+
+        assertTrue(sql.contains("1 = 0"));
+    }
+
+    @Test
+    void tableFunctionIsDeniedEvenWhenAnotherTableMatched() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        String sql = SqlConditionBuilder.apply(
+                "select p.id from sim_project p, my_func(1)",
+                Collections.singletonList(rule), Collections.emptyMap(), null, null, true);
+
+        assertTrue(sql.contains("p.dept_id = '100'"));
+        assertTrue(sql.contains("1 = 0"));
+    }
+
+    @Test
+    void withInsideSubJoinIsFiltered() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Collections.singletonList(101L), mapper.selectWithInsideSubJoin());
+    }
+
+    @Test
+    void databaseQualifiedTableStaysPhysicalBehindASameNameCte() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        String sql = SqlConditionBuilder.apply(
+                "with sim_project as (select 1 as id) "
+                        + "select * from sim_project c, db..sim_project",
+                Collections.singletonList(rule), Collections.emptyMap(), null, null, true);
+
+        assertTrue(sql.contains("db..sim_project.dept_id = '100'"));
+        assertFalse(sql.contains("1 = 0"));
+    }
+
+    @Test
+    void dbLinkQualifiedTableStaysPhysicalBehindASameNameCte() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        String sql = SqlConditionBuilder.apply(
+                "with sim_project as (select 1 as id) "
+                        + "select * from sim_project c, sim_project@link",
+                Collections.singletonList(rule), Collections.emptyMap(), null, null, true);
+
+        // Oracle rejects @link in a column qualifier; the implicit correlation
+        // name of the FROM item is the bare table name.
+        assertTrue(sql.contains("sim_project.dept_id = '100'"));
+        assertFalse(sql.contains("sim_project@link.dept_id"));
+        assertFalse(sql.contains("1 = 0"));
+    }
+
+    @Test
+    void annotationAliasIsIgnoredWithoutAnExplicitAlias() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        Map<String, String> aliases = Collections.singletonMap("sim_project", "p");
+        String sql = SqlConditionBuilder.apply(
+                "select * from sim_project",
+                Collections.singletonList(rule), aliases, null, null, true);
+
+        assertTrue(sql.contains("sim_project.dept_id = '100'"));
+        assertFalse(sql.contains("p.dept_id = '100'"));
+    }
+
+    @Test
+    void ignoredAliasDoesNotRedirectAQualifiedRuleField() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "p.dept_id", "=", "100");
+        Map<String, String> aliases = Collections.singletonMap("sim_project", "p");
+        String sql = SqlConditionBuilder.apply(
+                "select s.id from sim_project s join sim_other p on p.id = s.dept_id",
+                Collections.singletonList(rule), aliases, null, null, true);
+
+        assertTrue(sql.contains("1 = 0"));
+        assertFalse(sql.contains("p.dept_id = '100'"));
+    }
+
+    @Test
+    void quantifiedSubqueryIsFiltered() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        String sql = SqlConditionBuilder.apply(
+                "select 1 where 1 = any (select dept_id from sim_project)",
+                Collections.singletonList(rule), Collections.emptyMap(), null, null, true);
+
+        assertTrue(sql.contains("FROM sim_project WHERE"));
+        assertTrue(sql.contains("dept_id = '100'"));
+    }
+
+    @Test
+    void quantifiedSubqueryIsDeniedWithoutRules() {
+        String sql = SqlConditionBuilder.apply(
+                "select 1 where 1 = any (select dept_id from sim_project)",
+                Collections.emptyList(), Collections.emptyMap(), null, null, true);
+
+        assertTrue(sql.contains("1 = 0"));
+    }
+
+    @Test
+    void distinctOnSubqueryIsFiltered() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        String sql = SqlConditionBuilder.apply(
+                "select distinct on ((select max(dept_id) from sim_project)) id "
+                        + "from (select 1 as id) t",
+                Collections.singletonList(rule), Collections.emptyMap(), null, null, true);
+
+        assertTrue(sql.contains("FROM sim_project WHERE"));
+        assertTrue(sql.contains("dept_id = '100'"));
+    }
+
+    @Test
+    void hierarchicalStartWithSubqueryIsFiltered() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        String sql = SqlConditionBuilder.apply(
+                "select id from (select 1 as id) t "
+                        + "start with (select count(*) from sim_project) >= 0 "
+                        + "connect by prior id = id",
+                Collections.singletonList(rule), Collections.emptyMap(), null, null, true);
+
+        assertTrue(sql.contains("FROM sim_project WHERE"));
+        assertTrue(sql.contains("dept_id = '100'"));
+    }
+
+    @Test
+    void dualIsNotTreatedAsAProtectedTable() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        String sql = SqlConditionBuilder.apply(
+                "select 1 from dual",
+                Collections.singletonList(rule), Collections.emptyMap(), null, null, true);
+
+        assertFalse(sql.contains("1 = 0"));
+    }
+
+    @Test
+    void forwardReferenceInsideACteStaysPhysical() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        String sql = SqlConditionBuilder.apply(
+                "with a as (select id from b), b as (select * from sim_project) select id from a",
+                Collections.singletonList(rule), Collections.emptyMap(), null, null, true);
+
+        assertTrue(sql.contains("FROM b WHERE 1 = 0"));
+        assertTrue(sql.contains("sim_project.dept_id = '100'"));
+        assertFalse(sql.contains("FROM a WHERE 1 = 0"));
+    }
+
+    @Test
+    void innerCteNameShadowsTheOuterOneOnlyInTheMainBody() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        String sql = SqlConditionBuilder.apply(
+                "with c as (select id from sim_project) "
+                        + "select * from (with c as (select id from c) select id from c) q",
+                Collections.singletonList(rule), Collections.emptyMap(), null, null, true);
+
+        assertEquals(1, countOf(sql, "dept_id = '100'"));
+        assertFalse(sql.contains("1 = 0"));
+    }
+
+    @Test
+    void annotationAliasDoesNotLeakIntoACteBody() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        Map<String, String> aliases = Collections.singletonMap("sim_project", "p");
+        String sql = SqlConditionBuilder.apply(
+                "with c as (select * from sim_project) "
+                        + "select c.id from c join sim_project p on p.id = c.id",
+                Collections.singletonList(rule), aliases, null, null, true);
+
+        assertTrue(sql.contains("sim_project.dept_id = '100'"));
+        assertTrue(sql.contains("p.dept_id = '100'"));
+    }
+
+    @Test
+    void annotationAliasDoesNotFollowAnotherTable() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        Map<String, String> aliases = Collections.singletonMap("sim_project", "p");
+        String sql = SqlConditionBuilder.apply(
+                "select p.id from sim_project s join sim_other p on p.id = s.dept_id",
+                Collections.singletonList(rule), aliases, null, null, true);
+
+        assertTrue(sql.contains("s.dept_id = '100'"));
+        assertFalse(sql.contains("p.dept_id = '100'"));
+    }
+
+    @Test
+    void unruledJoinTableIsLeftOpenWithinAMatchedScope() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        String sql = SqlConditionBuilder.apply(
+                "select p.id from sim_project p join sim_dept d on d.id = p.dept_id",
+                Collections.singletonList(rule), Collections.emptyMap(), null, null, true);
+
+        assertTrue(sql.contains("p.dept_id = '100'"));
+        assertFalse(sql.contains("d.dept_id"));
+        assertFalse(sql.contains("1 = 0"));
+    }
+
+    @Test
+    void unruledSubqueryScopeIsDenied() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        String sql = SqlConditionBuilder.apply(
+                "select p.id from sim_project p where exists "
+                        + "(select 1 from sim_dept d where d.id = p.dept_id)",
+                Collections.singletonList(rule), Collections.emptyMap(), null, null, true);
+
+        assertTrue(sql.contains("p.dept_id = '100'"));
+        assertTrue(sql.contains("1 = 0"));
+    }
+
+    @Test
     void nestedCteIsFilteredWithoutDenyingItsMainQuery() {
         useSimple("dept_id", "=", "#{deptId}");
         setSubject(100L, "u1");
@@ -505,6 +759,10 @@ class SqlConcatenationSimulationTest {
 
     private static List<Long> ids(List<SimProject> rows) {
         return rows.stream().map(SimProject::getId).collect(Collectors.toList());
+    }
+
+    private static int countOf(String sql, String needle) {
+        return sql.split(Pattern.quote(needle), -1).length - 1;
     }
 
     private int counter = 1;

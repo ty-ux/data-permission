@@ -141,6 +141,31 @@ public interface SimProjectMapper {
     List<Long> selectSubJoinIds();
 
     @DataPermission(appPoint = "sim")
+    @Select("with params as (select 1 as x) "
+            + "select p.id from sim_project p, params where p.id = 101")
+    Long selectConstantCte();
+
+    @DataPermission(appPoint = "sim")
+    @Select("with recursive r(n) as (select 1 union all select n + 1 from r where n < 3) "
+            + "select r.n from sim_project p cross join r where p.id = 101 order by r.n")
+    List<Long> selectRecursiveConstantAnchor();
+
+    @DataPermission(appPoint = "sim")
+    @Select("select 1")
+    Integer selectConstant();
+
+    @DataPermission(appPoint = "sim")
+    @Select("select * from (values (1), (2)) v order by 1")
+    List<Integer> selectValuesFromItem();
+
+    @DataPermission(appPoint = "sim")
+    @Select("select p.id from sim_project p "
+            + "join (sim_project q join "
+            + "(with c as (select id, dept_id from sim_project) select id from c) t "
+            + "on t.id = q.id) on p.id = q.id where p.id = 101")
+    List<Long> selectWithInsideSubJoin();
+
+    @DataPermission(appPoint = "sim")
     @Select("<script>select id, name, dept_id, owner_no, create_by, status, amount "
             + "from sim_project where id in "
             + "<foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach> "

@@ -10,10 +10,12 @@ import com.ty.dp.core.model.RuleMode;
 import com.ty.dp.core.subject.DataPermissionSubject;
 import com.ty.dp.core.util.Reflections;
 import net.sf.jsqlparser.JSQLParserException;
+import net.sf.jsqlparser.expression.AnyComparisonExpression;
 import net.sf.jsqlparser.expression.DoubleValue;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.ExpressionVisitorAdapter;
 import net.sf.jsqlparser.expression.LongValue;
+import net.sf.jsqlparser.expression.OracleHierarchicalExpression;
 import net.sf.jsqlparser.expression.Parenthesis;
 import net.sf.jsqlparser.expression.StringValue;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
@@ -33,12 +35,17 @@ import net.sf.jsqlparser.expression.operators.relational.NamedExpressionList;
 import net.sf.jsqlparser.expression.operators.relational.NotEqualsTo;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Column;
+import net.sf.jsqlparser.schema.Database;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
+import net.sf.jsqlparser.statement.select.Distinct;
+import net.sf.jsqlparser.statement.select.ExpressionListItem;
 import net.sf.jsqlparser.statement.select.FromItem;
+import net.sf.jsqlparser.statement.select.FunctionItem;
 import net.sf.jsqlparser.statement.select.Join;
 import net.sf.jsqlparser.statement.select.OrderByElement;
 import net.sf.jsqlparser.statement.select.ParenthesisFromItem;
+import net.sf.jsqlparser.statement.select.Pivot;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
 import net.sf.jsqlparser.statement.select.SelectBody;
@@ -49,6 +56,9 @@ import net.sf.jsqlparser.statement.select.SpecialSubSelect;
 import net.sf.jsqlparser.statement.select.SubJoin;
 import net.sf.jsqlparser.statement.select.SubSelect;
 import net.sf.jsqlparser.statement.select.TableFunction;
+import net.sf.jsqlparser.statement.select.Top;
+import net.sf.jsqlparser.statement.select.UnPivot;
+import net.sf.jsqlparser.statement.select.ValuesList;
 import net.sf.jsqlparser.statement.select.WithItem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -339,20 +349,23 @@ public final class SqlConditionBuilder {
                 denyWhenEmpty, cteNames, scan);
         changed |= scan.changed;
 
-        if (permission == null && denyWhenEmpty) {
+        if (denyWhenEmpty) {
             // A physical table without a rule still needs the outer deny, even
-            // when a subquery was rewritten. Only a scope made entirely of CTE
-            // references (whose bodies were rewritten) or a derived-table scope
-            // with a rewritten subquery may pass through.
-            if (hasPhysicalTables(scope, cteNames)
-                    || (!onlyCteTables(scope, cteNames) && !scan.changed)) {
+            // when a subquery was rewritten. Opaque sources (table functions)
+            // cannot be filtered, so they stay denied even when another table
+            // in the scope matched a rule. Scopes with no physical source
+            // (constants, CTE references, derived tables) expose no rows of
+            // their own and pass through.
+            if (scope.opaque || (permission == null && hasPhysicalTables(scope, cteNames))) {
                 Expression where = plainSelect.getWhere();
                 Expression denied = falseExpression();
                 plainSelect.setWhere(where == null
                         ? denied
                         : new AndExpression(new Parenthesis(denied), new Parenthesis(where)));
             }
-            changed = true;
+            if (permission == null) {
+                changed = true;
+            }
         }
         return changed;
     }
@@ -375,13 +388,20 @@ public final class SqlConditionBuilder {
     private static void addScopeTable(FromItem fromItem, QueryScope scope, String outerAlias) {
         if (fromItem instanceof Table) {
             Table table = (Table) fromItem;
+            if (isDual(table)) {
+                // DUAL is a constant pseudo-table, not a row source to protect.
+                return;
+            }
+            boolean explicitAlias = table.getAlias() != null
+                    || (outerAlias != null && !outerAlias.trim().isEmpty());
             String alias = table.getAlias() != null
                     ? table.getAlias().getName()
-                    : (isQualified(table) ? table.getFullyQualifiedName() : table.getName());
+                    : defaultQualifier(table);
             if (outerAlias != null && !outerAlias.trim().isEmpty()) {
                 alias = outerAlias;
             }
-            scope.add(new TableInstance(normalize(table.getName()), alias, isQualified(table)));
+            scope.add(new TableInstance(normalize(table.getName()), alias, explicitAlias,
+                    isQualified(table)));
         } else if (fromItem instanceof ParenthesisFromItem) {
             ParenthesisFromItem parenthesis = (ParenthesisFromItem) fromItem;
             String alias = parenthesis.getAlias() != null
@@ -399,10 +419,16 @@ public final class SqlConditionBuilder {
                     addScopeTable(join.getRightItem(), scope, null);
                 }
             }
-        } else if (fromItem instanceof SubSelect || fromItem instanceof SpecialSubSelect
-                || fromItem instanceof TableFunction) {
-            // Derived table or table function: subqueries are handled by
-            // scanFromItem; there is no physical table in this scope.
+        } else if (fromItem instanceof SubSelect || fromItem instanceof SpecialSubSelect) {
+            // Derived table: subqueries are handled by scanFromItem; there is
+            // no physical table in this scope.
+        } else if (fromItem instanceof TableFunction) {
+            // A table function is itself a row source that cannot be filtered;
+            // keep it fail-closed under the default deny policy.
+            scope.opaque = true;
+        } else if (fromItem instanceof ValuesList) {
+            // VALUES is a constant source; subqueries in its rows are handled
+            // by scanFromItem.
         } else if (fromItem != null) {
             throw new DataPermissionException("Unsupported FROM item for data permission: "
                     + fromItem.getClass().getName());
@@ -431,8 +457,19 @@ public final class SqlConditionBuilder {
                         + " times in the same query");
             }
             TableInstance instance = instances.get(0);
-            instance.effectiveAlias = entry.getValue().trim();
-            scope.byAlias.put(normalize(instance.effectiveAlias), instance);
+            String override = entry.getValue().trim();
+            if (instance.explicitAlias && normalize(override).equals(normalize(instance.alias))) {
+                instance.effectiveAlias = override;
+                scope.byAlias.put(normalize(override), instance);
+            } else if (!instance.explicitAlias && normalize(override).equals(table)) {
+                // The override names the table itself; the parsed qualifier is
+                // already correct and keeps any schema/dblink prefix.
+            } else {
+                // Applying an alias the query does not define would either make
+                // the SQL invalid or attach the predicate to another table.
+                log.warn("Ignoring data permission tableAlias '{}:{}': table '{}' is referenced as '{}'",
+                        entry.getKey(), override, table, instance.alias);
+            }
         }
     }
 
@@ -468,18 +505,6 @@ public final class SqlConditionBuilder {
         return rulesByTable;
     }
 
-    private static boolean onlyCteTables(QueryScope scope, Set<String> cteNames) {
-        if (scope.instances.isEmpty() || cteNames == null || cteNames.isEmpty()) {
-            return false;
-        }
-        for (TableInstance instance : scope.instances) {
-            if (isPhysical(instance, cteNames)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     private static boolean hasPhysicalTables(QueryScope scope, Set<String> cteNames) {
         for (TableInstance instance : scope.instances) {
             if (isPhysical(instance, cteNames)) {
@@ -513,8 +538,51 @@ public final class SqlConditionBuilder {
         if (!isBlank(table.getSchemaName())) {
             return true;
         }
+        Database database = table.getDatabase();
+        if (database != null && !isBlank(database.getDatabaseName())) {
+            return true;
+        }
+        List<String> parts = table.getNameParts();
+        if (parts != null) {
+            // A database-only name (db..project) has three parts.
+            if (parts.size() > 1) {
+                return true;
+            }
+        }
+        if (isDBLink(table)) {
+            return true;
+        }
         String name = table.getName();
         return name != null && name.indexOf('.') >= 0;
+    }
+
+    private static String defaultQualifier(Table table) {
+        if (!isQualified(table)) {
+            return table.getName();
+        }
+        if (isDBLink(table)) {
+            // Oracle accepts @link only on the object name, not in a column
+            // qualifier; the implicit correlation name is the bare table name.
+            return table.getName();
+        }
+        return table.getFullyQualifiedName();
+    }
+
+    private static boolean isDBLink(Table table) {
+        List<String> parts = table.getNameParts();
+        if (parts != null) {
+            for (String part : parts) {
+                if (part != null && part.indexOf('@') >= 0) {
+                    return true;
+                }
+            }
+        }
+        String name = table.getName();
+        return name != null && name.indexOf('@') >= 0;
+    }
+
+    private static boolean isDual(Table table) {
+        return !isQualified(table) && "dual".equals(normalize(table.getName()));
     }
 
     private static void processSubqueries(PlainSelect plainSelect,
@@ -527,11 +595,13 @@ public final class SqlConditionBuilder {
                                           SubqueryScan scan) {
         SubqueryExpressionVisitor visitor = new SubqueryExpressionVisitor(
                 rules, annotationAliases, subject, parameter, denyWhenEmpty, cteNames, scan);
+        scanPivot(plainSelect.getFromItem(), visitor);
         scanFromItem(plainSelect.getFromItem(), visitor, rules, annotationAliases,
                 subject, parameter, denyWhenEmpty, cteNames, scan);
         List<Join> joins = plainSelect.getJoins();
         if (joins != null) {
             for (Join join : joins) {
+                scanPivot(join.getRightItem(), visitor);
                 scanFromItem(join.getRightItem(), visitor, rules, annotationAliases,
                         subject, parameter, denyWhenEmpty, cteNames, scan);
                 if (join.getOnExpressions() != null) {
@@ -559,6 +629,29 @@ public final class SqlConditionBuilder {
         if (plainSelect.getOrderByElements() != null) {
             for (OrderByElement orderBy : plainSelect.getOrderByElements()) {
                 visitor.scan(orderBy.getExpression());
+            }
+        }
+        Distinct distinct = plainSelect.getDistinct();
+        if (distinct != null && distinct.getOnSelectItems() != null) {
+            for (SelectItem selectItem : distinct.getOnSelectItems()) {
+                if (selectItem instanceof SelectExpressionItem) {
+                    visitor.scan(((SelectExpressionItem) selectItem).getExpression());
+                }
+            }
+        }
+        if (plainSelect.getTop() != null) {
+            visitor.scan(plainSelect.getTop().getExpression());
+        }
+        OracleHierarchicalExpression hierarchical = plainSelect.getOracleHierarchical();
+        if (hierarchical != null) {
+            visitor.scan(hierarchical.getStartExpression());
+            visitor.scan(hierarchical.getConnectExpression());
+        }
+        if (plainSelect.getGroupBy() != null && plainSelect.getGroupBy().getGroupingSets() != null) {
+            for (Object groupingSet : plainSelect.getGroupBy().getGroupingSets()) {
+                if (groupingSet instanceof ExpressionList) {
+                    scanExpressions(((ExpressionList) groupingSet).getExpressions(), visitor);
+                }
             }
         }
         if (plainSelect.getLimit() != null) {
@@ -590,13 +683,17 @@ public final class SqlConditionBuilder {
             }
         } else if (fromItem instanceof TableFunction) {
             visitor.scan(((TableFunction) fromItem).getFunction());
+        } else if (fromItem instanceof ValuesList) {
+            scanItems(((ValuesList) fromItem).getMultiExpressionList(), visitor);
         } else if (fromItem instanceof SubJoin) {
             SubJoin subJoin = (SubJoin) fromItem;
+            scanPivot(subJoin.getLeft(), visitor);
             scanFromItem(subJoin.getLeft(), visitor, rules, annotationAliases,
                     subject, parameter, denyWhenEmpty, cteNames, scan);
             List<Join> subJoins = subJoin.getJoinList();
             if (subJoins != null) {
                 for (Join join : subJoins) {
+                    scanPivot(join.getRightItem(), visitor);
                     scanFromItem(join.getRightItem(), visitor, rules, annotationAliases,
                             subject, parameter, denyWhenEmpty, cteNames, scan);
                     if (join.getOnExpressions() != null) {
@@ -609,6 +706,46 @@ public final class SqlConditionBuilder {
         } else if (fromItem instanceof ParenthesisFromItem) {
             scanFromItem(((ParenthesisFromItem) fromItem).getFromItem(), visitor,
                     rules, annotationAliases, subject, parameter, denyWhenEmpty, cteNames, scan);
+        }
+    }
+
+    private static void scanPivot(FromItem fromItem, SubqueryExpressionVisitor visitor) {
+        if (fromItem instanceof Table) {
+            Table table = (Table) fromItem;
+            scanPivot(table.getPivot(), table.getUnPivot(), visitor);
+        } else if (fromItem instanceof SubSelect) {
+            SubSelect subSelect = (SubSelect) fromItem;
+            scanPivot(subSelect.getPivot(), subSelect.getUnPivot(), visitor);
+        } else if (fromItem instanceof ValuesList) {
+            ValuesList values = (ValuesList) fromItem;
+            scanPivot(values.getPivot(), values.getUnPivot(), visitor);
+        }
+    }
+
+    private static void scanPivot(Pivot pivot, UnPivot unPivot, SubqueryExpressionVisitor visitor) {
+        if (pivot != null) {
+            if (pivot.getFunctionItems() != null) {
+                for (FunctionItem item : pivot.getFunctionItems()) {
+                    visitor.scan(item.getFunction());
+                }
+            }
+            if (pivot.getSingleInItems() != null) {
+                for (SelectExpressionItem item : pivot.getSingleInItems()) {
+                    visitor.scan(item.getExpression());
+                }
+            }
+            if (pivot.getMultiInItems() != null) {
+                for (ExpressionListItem item : pivot.getMultiInItems()) {
+                    if (item.getExpressionList() != null) {
+                        scanExpressions(item.getExpressionList().getExpressions(), visitor);
+                    }
+                }
+            }
+        }
+        if (unPivot != null && unPivot.getUnPivotInClause() != null) {
+            for (SelectExpressionItem item : unPivot.getUnPivotInClause()) {
+                visitor.scan(item.getExpression());
+            }
         }
     }
 
@@ -673,7 +810,7 @@ public final class SqlConditionBuilder {
             log.warn("Data permission rule [{}] has an invalid field or operator", rule.getId());
             return null;
         }
-        Column column = createColumn(rule.getFieldName(), instance, scope);
+        Column column = createColumn(rule.getFieldName(), instance, scope, true);
         if (column == null) {
             log.warn("Data permission rule [{}] has an invalid column: {}", rule.getId(), rule.getFieldName());
             return null;
@@ -795,7 +932,7 @@ public final class SqlConditionBuilder {
             log.warn("Data permission rule item [{}] has an invalid operator: {}", item.getId(), item.getOperator());
             return null;
         }
-        Column left = createColumn(item.getLeftExpr(), instance, scope);
+        Column left = createColumn(item.getLeftExpr(), instance, scope, true);
         if (left == null) {
             log.warn("Data permission rule item [{}] has an invalid left expression: {}", item.getId(), item.getLeftExpr());
             return null;
@@ -809,7 +946,7 @@ public final class SqlConditionBuilder {
 
         RightValueType rightType = item.getRightType() == null ? RightValueType.CONST : item.getRightType();
         if (rightType == RightValueType.FIELD) {
-            Column right = createColumn(item.getRightExpr(), instance, scope);
+            Column right = createColumn(item.getRightExpr(), instance, scope, false);
             if (right == null) {
                 log.warn("Data permission rule item [{}] has an invalid right expression: {}", item.getId(), item.getRightExpr());
                 return null;
@@ -956,7 +1093,8 @@ public final class SqlConditionBuilder {
         return new StringValue(escape(String.valueOf(value)));
     }
 
-    private static Column createColumn(String expression, TableInstance instance, QueryScope scope) {
+    private static Column createColumn(String expression, TableInstance instance, QueryScope scope,
+                                       boolean leftSide) {
         if (isBlank(expression)) {
             return null;
         }
@@ -974,6 +1112,12 @@ public final class SqlConditionBuilder {
                     // instance so a self-join filters every alias.
                     return new Column(instance.effectiveAlias + "." + parts[1]);
                 }
+                if (leftSide) {
+                    // A rule's left field must belong to the protected table;
+                    // binding it to another relation would filter that table
+                    // instead and leave the protected one open.
+                    return null;
+                }
                 // An explicit alias of another table wins; it may refer to an
                 // outer scope.
                 return new Column(parts[0] + "." + parts[1]);
@@ -984,12 +1128,18 @@ public final class SqlConditionBuilder {
                     if (instance != null && instance.tableName.equals(qualifier)) {
                         return new Column(instance.effectiveAlias + "." + parts[1]);
                     }
+                    if (leftSide) {
+                        return null;
+                    }
                     if (instances.size() == 1) {
                         return new Column(instances.get(0).effectiveAlias + "." + parts[1]);
                     }
                     throw new DataPermissionException("Ambiguous table reference '" + parts[0]
                             + "' in data permission rule");
                 }
+            }
+            if (leftSide) {
+                return null;
             }
             return new Column(parts[0] + "." + parts[1]);
         }
@@ -1072,19 +1222,23 @@ public final class SqlConditionBuilder {
     private static final class TableInstance {
         private final String tableName;
         private final String alias;
+        private final boolean explicitAlias;
         private final boolean qualified;
         private String effectiveAlias;
 
-        private TableInstance(String tableName, String alias, boolean qualified) {
+        private TableInstance(String tableName, String alias, boolean explicitAlias,
+                              boolean qualified) {
             this.tableName = tableName;
             this.alias = alias == null || alias.trim().isEmpty() ? tableName : alias;
             this.effectiveAlias = this.alias;
+            this.explicitAlias = explicitAlias;
             this.qualified = qualified;
         }
     }
 
     private static final class QueryScope {
         private final List<TableInstance> instances = new ArrayList<TableInstance>();
+        private boolean opaque;
         private final Map<String, List<TableInstance>> byTable =
                 new LinkedHashMap<String, List<TableInstance>>();
         private final Map<String, TableInstance> byAlias =
@@ -1142,6 +1296,20 @@ public final class SqlConditionBuilder {
         public void visit(SubSelect subSelect) {
             scan.changed |= addToSubSelect(subSelect,
                     rules, annotationAliases, subject, parameter, denyWhenEmpty, cteNames);
+        }
+
+        @Override
+        public void visit(AnyComparisonExpression anyComparison) {
+            // ExpressionVisitorAdapter does not descend into ANY/ALL/SOME.
+            if (anyComparison.isUsingSubSelect()) {
+                SubSelect subSelect = anyComparison.getSubSelect();
+                if (subSelect != null) {
+                    scan.changed |= addToSubSelect(subSelect,
+                            rules, annotationAliases, subject, parameter, denyWhenEmpty, cteNames);
+                }
+            } else {
+                scanItems(anyComparison.getItemsList(), this);
+            }
         }
     }
 }
