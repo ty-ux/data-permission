@@ -14,6 +14,10 @@
     <name>data-permission-sample</name>
     <description>Integration sample and tests</description>
 
+    <properties>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.ty</groupId>
