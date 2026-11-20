@@ -163,7 +163,7 @@ PageHelper 生成 `select count(0) from (原 SQL) table_count` 时，拦截器�
 
 ## 7. 注解与规则匹配范围
 
-- 规则只对标注了 `@DataPermission` 的 Mapper 方法生效
+- 规则只对标注了 `@DataPermission` 的 Mapper 方法或接口生效
 - 注解的 `appPoint` 为空时，只按表名匹配
 - 规则表名不在当前 SQL 的表集合中时，该规则被忽略；若最终没有任何条件且 `default-policy=DENY`，整条查询仍会被 `1 = 0` 拒绝
 - `@DataPermission` 可以放在接口上作为默认值，方法上的注解覆盖接口注解

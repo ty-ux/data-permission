@@ -1,6 +1,8 @@
 package com.ty.dp.sample;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
 import com.ty.dp.core.model.DataPermissionRule;
@@ -84,6 +86,19 @@ class MybatisPlusIntegrationTest {
 
         assertEquals(3L, page.getTotal());
         assertEquals(Arrays.asList(101L, 102L), ids(rows));
+    }
+
+    @Test
+    void mybatisPlusPaginationAppliesTheRuleToCountAndPage() {
+        assignDepartmentRule();
+        setSubject(false);
+
+        IPage<SimProject> page = plusMapper.selectPage(
+                new Page<SimProject>(1, 2),
+                new QueryWrapper<SimProject>().orderByAsc("id"));
+
+        assertEquals(3L, page.getTotal());
+        assertEquals(Arrays.asList(101L, 102L), ids(page.getRecords()));
     }
 
     @Test
