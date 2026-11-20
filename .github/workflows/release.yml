@@ -44,6 +44,7 @@ jobs:
           cp data-permission-core/target/data-permission-core-[0-9]*.jar dist/
           cp data-permission-mybatis/target/data-permission-mybatis-[0-9]*.jar dist/
           cp data-permission-starter/target/data-permission-starter-[0-9]*.jar dist/
+          rm -f dist/*-sources.jar
 
       - name: Create GitHub Release
         env:

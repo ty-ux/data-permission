@@ -57,7 +57,7 @@ data-permission:
 
 ## 4. 给 Mapper 加注解
 
-只有标注 `@DataPermission` 的 Mapper 方法会被改写。建议按「一个业务列表查询一个应用点」的粒度注解，不要给所有查询批量注解。
+只有标注 `@DataPermission` 的 Mapper 方法或接口会被改写。建议按「一个业务列表查询一个应用点」的粒度注解，不要给所有查询批量注解。
 
 ```java
 @Mapper
@@ -78,6 +78,19 @@ public interface ProjectMapper {
 ```
 
 XML Mapper 不需要改 SQL，注解加在接口方法上即可。
+
+### MyBatis-Plus BaseMapper
+
+`BaseMapper` 的 `selectList` / `selectPage` / `selectCount` 由 MyBatis-Plus 动态生成，没有可注解的接口方法，需要把 `@DataPermission` 放在 Mapper 接口上：
+
+```java
+@Mapper
+@DataPermission(appPoint = "project")
+public interface ProjectMapper extends BaseMapper<Project> {
+}
+```
+
+接口级注解对继承方法和自定义方法都生效，方法级注解覆盖接口级注解。`PaginationInnerInterceptor` 生成的 count SQL 同样会带上权限条件。
 
 ### 表别名
 
@@ -197,7 +210,7 @@ RuoYi 自带的 `@DataScope` 是在 Service 层拼接 `params.dataScope`，依�
 
 | 现象 | 排查点 |
 | --- | --- |
-| SQL 没有被改写 | Mapper 方法是否标注 `@DataPermission`；`enabled` / `mode` 是否为关闭；`appPoint` 是否与规则匹配 |
+| SQL 没有被改写 | Mapper 方法或接口是否标注 `@DataPermission`；`enabled` / `mode` 是否为关闭；`appPoint` 是否与规则匹配 |
 | 查询返回空 | `default-policy=DENY` 且该用户没有规则；规则表名与 SQL 中的表名不一致；动态值解析为 null |
 | 分页总数不对 | 确认 starter 在 PageHelper 之后装配（默认已处理）；不要手动调整拦截器顺序 |
 | 规则不生效 | 角色 id 是否为字符串形式；`sys_role_permission_rule.is_del` 是否为 `0`；`enabled` 是否为 `1` |
