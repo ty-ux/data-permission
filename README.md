@@ -11,6 +11,7 @@
 - **按角色配置**：一个角色可绑定多条规则；同一张表的规则按 `priority` / `sort_order` 组合。
 - **简单规则 + 复杂规则**：字段比较、动态取值、常量、字段对字段、`IN`、`LIKE`、`IS NULL`；复杂规则支持分组（组间 OR、子组间 AND）。
 - **默认拒绝（fail-closed）**：有登录用户但没有匹配规则、或动态值解析失败时，追加 `1 = 0`，而不是放行全部数据。
+- **子查询与 CTE 感知**：递归改写 `FROM` / `JOIN`、列、`WHERE` 等位置的子查询与 `WITH` 子句，按别名分别过滤；同名 CTE 不会跳过物理表，嵌套 CTE 也能正确处理。
 - **灰度模式**：`LOG_ONLY` 只记录将要改写的 SQL，不实际过滤，适合上线前逐条核对。
 - **分页一致**：与 PageHelper / MyBatis-Plus 分页协作，权限条件会进入 count SQL，分页总数与列表一致。
 - **宿主无侵入**：通过反射适配 Spring Security principal（RuoYi `LoginUser` 开箱可用），不依赖宿主实体类；自定义认证体系只需提供一个 `DataPermissionSubjectProvider`。
@@ -153,7 +154,7 @@ values ('rr-dept', '2', 'r-dept', '0');
 | GET | `/roles/{roleId}/rules` | 角色已绑定的规则 id |
 | PUT | `/roles/{roleId}/rules` | 覆盖角色规则，body：`{"ruleIds":["r1"]}` |
 
-接口本身不做鉴权，**启用前必须由宿主项目在网关或 Spring Security 中限制访问**。规则变更后管理 API 会失效当前实例的缓存；多实例部署依赖 `cache-ttl-seconds` 自动过期。
+接口本身不做鉴权，**启用前必须由宿主项目在网关或 Spring Security 中限制访问**。规则变更后管理 API 会失效当前实例的缓存（事务提交或回滚后再次失效）；多实例部署依赖 `cache-ttl-seconds` 自动过期。
 
 前端页面：
 
@@ -166,7 +167,7 @@ values ('rr-dept', '2', 'r-dept', '0');
 mvn -B -ntp verify
 ```
 
-示例模块使用 H2 内存库，46 个测试覆盖简单规则、复杂规则、超级管理员、无规则拒绝、`@DataPermissionIgnore`、PageHelper 分页计数、MyBatis-Plus `BaseMapper` 查询与分页计数、规则变更后的缓存刷新和 `LOG_ONLY` 模式。
+示例模块使用 H2 内存库，74 个测试覆盖简单规则、复杂规则、超级管理员、无规则拒绝、子查询与 CTE、PageHelper 分页计数、MyBatis-Plus `BaseMapper` 查询与分页计数、规则变更后的缓存刷新和 `LOG_ONLY` 模式。
 
 CI/CD：
 

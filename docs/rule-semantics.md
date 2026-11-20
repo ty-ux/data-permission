@@ -52,7 +52,7 @@ condition_value = #{deptId}
 condition_value = PENDING
 ```
 
-先尝试按用户字段/参数属性解析；解析不到时作为字符串常量 `'PENDING'`。想强制使用字符串常量时，建议加上引号：`'PENDING'`（引号会被去掉，值仍是 `PENDING`）。
+先尝试按用户字段/参数属性解析；解析不到时作为字符串常量 `'PENDING'`。想强制使用字符串常量时，建议加上引号：`'PENDING'`（引号会被去掉，值仍是 `PENDING`；字符串内部的单引号写成两个单引号，例如 `'O''Brien'`）。
 
 ### 操作符
 
@@ -97,7 +97,7 @@ condition_value = PENDING
 | `FIELD` | 另一个字段，例如 `a.create_by` 或 `other_table.owner_no` |
 | `NONE` | 不使用右值（`IS_NULL` / `IS_NOT_NULL`） |
 
-左值 `left_expr` 支持 `dept_id` 或 `project.dept_id`；后者在表名与当前受保护表一致时会替换为实际别名。
+左值 `left_expr` 支持 `dept_id` 或 `project.dept_id`；后者在表名与当前受保护表一致时会替换为实际别名。同一张表自连接时，限定字段会按当前表实例展开（规则字段 `a.dept_id` 在别名 `b` 的实例上生成 `b.dept_id`）。
 
 ## 4. 多条规则如何组合
 
@@ -121,6 +121,8 @@ condition_value = PENDING
 | --- | --- |
 | 用户没有任何命中规则，`default-policy=DENY` | 整条 SQL 追加 `1 = 0` |
 | 用户没有任何命中规则，`default-policy=ALLOW` | 不改写，放行 |
+| 外层物理表没有命中规则，内层子查询已改写 | 外层仍追加 `1 = 0`，默认拒绝不会被内层改写掩盖 |
+| 作用域只有 CTE 引用，或只含已改写的派生表 | 由 CTE/子查询内部条件控制，外层不额外追加 `1 = 0` |
 | 规则字段名/操作符非法 | 该规则生成 `1 = 0` |
 | 动态值解析不到 | 该规则生成 `1 = 0` |
 | `IN` 列表为空 | 该规则生成 `1 = 0` |
@@ -157,9 +159,21 @@ PageHelper 生成 `select count(0) from (原 SQL) table_count` 时，拦截器�
 
 `UNION` / `UNION ALL` 的每个分支分别改写。
 
-### 子查询
+### 子查询与 CTE
 
-主查询 `FROM` 是一个子查询时（典型是 count 包装），递归进入子查询改写。`JOIN` 右侧的子查询不在自动处理范围内；其中的受保护表需要拆分为独立查询或显式豁免。
+主查询 `FROM` 或 `JOIN` 右侧是子查询时，递归进入子查询改写；`SELECT`、`WHERE`、`HAVING`、`GROUP BY`、`ORDER BY`、`LIMIT`/`OFFSET` 中的子查询同样处理。
+
+CTE（`WITH`）按 SQL 作用域处理：
+
+- 每个 CTE 的查询体单独改写，规则只作用于其中的物理表。
+- 非递归 CTE 自己的名字在其查询体内不可见；前面的 CTE 对后面的 CTE 可见；主查询可见全部 CTE。
+- `WITH RECURSIVE` 中每个 CTE 的自身名称对其查询体可见，递归自引用不会被当作物理表。
+- 带 schema 的物理表（如 `public.project`）即使与 CTE 同名，也按物理表处理；生成的字段限定符使用 schema 限定名，避免被 CTE 遮蔽。
+- 嵌套在子查询中的 `WITH` 子句（如 `select * from (with c as (...) select ...) q`）也会被处理。
+
+> 测试提示：H2 2.1.214 在 CTE 与物理表同名时会忽略 CTE 体内的 `WHERE`（即使 `1 = 0`）；这是 H2 的执行缺陷，MySQL 不受影响。H2 集成测试请检查改写后的 SQL，或给 CTE 换一个名字。
+
+外层物理表没有命中规则时，即使内层子查询已经改写，外层仍会追加 `1 = 0`；只有作用域仅由 CTE 引用或已改写的派生表组成时，才由内层条件控制。
 
 ## 7. 注解与规则匹配范围
 

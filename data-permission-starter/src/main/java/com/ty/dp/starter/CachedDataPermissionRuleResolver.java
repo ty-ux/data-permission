@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Caches rules per role set + application point. Rule changes call
@@ -18,6 +19,8 @@ public class CachedDataPermissionRuleResolver implements DataPermissionRuleResol
 
     private final DataPermissionRuleRepository repository;
     private final TtlCache<List<DataPermissionRule>> cache;
+    private final AtomicLong generation = new AtomicLong();
+    private final Object publishLock = new Object();
 
     public CachedDataPermissionRuleResolver(DataPermissionRuleRepository repository, long ttlSeconds) {
         this.repository = repository;
@@ -41,15 +44,25 @@ public class CachedDataPermissionRuleResolver implements DataPermissionRuleResol
         if (cached != null) {
             return cached;
         }
+        long seenGeneration = generation.get();
         List<DataPermissionRule> loaded = repository.findByRoles(sorted, appPoint);
         List<DataPermissionRule> immutable = Collections.unmodifiableList(
                 loaded == null ? new ArrayList<DataPermissionRule>() : new ArrayList<DataPermissionRule>(loaded));
-        cache.put(key, immutable);
+        synchronized (publishLock) {
+            // An invalidation between the repository read and the cache write
+            // must not let the stale result be published.
+            if (generation.get() == seenGeneration) {
+                cache.put(key, immutable);
+            }
+        }
         return immutable;
     }
 
     public void invalidateAll() {
-        cache.clear();
+        synchronized (publishLock) {
+            generation.incrementAndGet();
+            cache.clear();
+        }
     }
 
     private static String buildKey(List<String> roleIds, String appPoint) {

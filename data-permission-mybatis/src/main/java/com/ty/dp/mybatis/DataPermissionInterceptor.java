@@ -165,17 +165,13 @@ public class DataPermissionInterceptor implements Interceptor {
                     subject == null ? "none" : subject.getSubjectId(), statement.getId(), rewritten);
         }
 
-        SqlSource sqlSource = new StaticSqlSource(statement.getConfiguration(), rewritten,
-                boundSql.getParameterMappings());
+        SqlSource sqlSource = new AdditionalParameterSqlSource(statement.getConfiguration(),
+                rewritten, boundSql.getParameterMappings(), boundSql.getAdditionalParameters());
         Object[] args = invocation.getArgs();
         MappedStatement rewrittenStatement = copyWithSqlSource(statement, sqlSource);
         args[0] = rewrittenStatement;
         if (args.length == 6) {
-            BoundSql rewrittenBoundSql = new BoundSql(statement.getConfiguration(), rewritten,
-                    boundSql.getParameterMappings(), boundSql.getParameterObject());
-            for (Map.Entry<String, Object> entry : boundSql.getAdditionalParameters().entrySet()) {
-                rewrittenBoundSql.setAdditionalParameter(entry.getKey(), entry.getValue());
-            }
+            BoundSql rewrittenBoundSql = rewrittenStatement.getBoundSql(boundSql.getParameterObject());
             args[5] = rewrittenBoundSql;
             if (args[4] instanceof CacheKey) {
                 // The caller (MyBatis-Plus, PageHelper, ...) computed the key from the
@@ -185,6 +181,35 @@ public class DataPermissionInterceptor implements Interceptor {
             }
         }
         return invocation.proceed();
+    }
+
+    /**
+     * Keeps the rewritten SQL together with the original additional parameters.
+     * {@code foreach} and {@code bind} store values outside the mapper parameter
+     * object; {@link StaticSqlSource} alone would lose them.
+     */
+    private static final class AdditionalParameterSqlSource implements SqlSource {
+        private final SqlSource delegate;
+        private final Map<String, Object> additionalParameters;
+
+        private AdditionalParameterSqlSource(Configuration configuration,
+                                             String sql,
+                                             List<ParameterMapping> parameterMappings,
+                                             Map<String, Object> additionalParameters) {
+            this.delegate = new StaticSqlSource(configuration, sql, parameterMappings);
+            this.additionalParameters = additionalParameters == null
+                    ? Collections.<String, Object>emptyMap()
+                    : new LinkedHashMap<String, Object>(additionalParameters);
+        }
+
+        @Override
+        public BoundSql getBoundSql(Object parameterObject) {
+            BoundSql boundSql = delegate.getBoundSql(parameterObject);
+            for (Map.Entry<String, Object> entry : additionalParameters.entrySet()) {
+                boundSql.setAdditionalParameter(entry.getKey(), entry.getValue());
+            }
+            return boundSql;
+        }
     }
 
     /**

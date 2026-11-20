@@ -15,6 +15,8 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -343,8 +345,29 @@ public class DataPermissionAdminService {
     }
 
     private void invalidate() {
-        if (ruleResolver instanceof CachedDataPermissionRuleResolver) {
-            ((CachedDataPermissionRuleResolver) ruleResolver).invalidateAll();
+        if (!(ruleResolver instanceof CachedDataPermissionRuleResolver)) {
+            return;
+        }
+        final CachedDataPermissionRuleResolver resolver =
+                (CachedDataPermissionRuleResolver) ruleResolver;
+        // Clear now for readers in this transaction; clear again when the
+        // transaction ends so this transaction's uncommitted rows can never
+        // survive in the cache, whether it commits or rolls back.
+        resolver.invalidateAll();
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    resolver.invalidateAll();
+                }
+
+                @Override
+                public void afterCompletion(int status) {
+                    if (status != TransactionSynchronization.STATUS_COMMITTED) {
+                        resolver.invalidateAll();
+                    }
+                }
+            });
         }
     }
 

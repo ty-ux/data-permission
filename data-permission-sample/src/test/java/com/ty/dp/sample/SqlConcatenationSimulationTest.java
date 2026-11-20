@@ -7,6 +7,7 @@ import com.ty.dp.core.model.DataPermissionRuleItem;
 import com.ty.dp.core.model.LogicOperator;
 import com.ty.dp.core.model.RightValueType;
 import com.ty.dp.core.model.RuleMode;
+import com.ty.dp.core.sql.SqlConditionBuilder;
 import com.ty.dp.core.subject.DataPermissionContext;
 import com.ty.dp.core.subject.SimpleDataPermissionSubject;
 import com.ty.dp.starter.admin.DataPermissionAdminService;
@@ -25,6 +26,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -143,6 +146,223 @@ class SqlConcatenationSimulationTest {
         useSimple("dept_id", "=", "#{deptId}");
         setSubject(100L, "u1");
         assertEquals(Arrays.asList(101L, 102L, 103L), ids(mapper.selectSchemaQualified()));
+    }
+
+    @Test
+    void selfJoinFiltersEveryTableInstance() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Arrays.asList(101L, 102L, 103L), ids(mapper.selectSelfJoin()));
+        assertEquals(Arrays.asList(101L, 102L, 103L), ids(mapper.selectSelfJoinThree()));
+    }
+
+    @Test
+    void selfJoinExpandsAnAliasQualifiedFieldPerInstance() {
+        useSimple("a.dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Arrays.asList(101L, 102L, 103L), ids(mapper.selectSelfJoin()));
+    }
+
+    @Test
+    void outerTableIsFilteredWhenFromIsASubquery() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Arrays.asList(101L, 102L, 103L),
+                ids(mapper.selectFromSubqueryWithOuterTable()));
+    }
+
+    @Test
+    void scalarSubqueryInSelectIsFiltered() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Long.valueOf(3L), mapper.selectScalarSubqueryCount());
+    }
+
+    @Test
+    void subqueryInWhereIsFiltered() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertTrue(mapper.selectExistsSubquery().isEmpty());
+    }
+
+    @Test
+    void cteBodyIsFiltered() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Arrays.asList(101L, 102L, 103L), ids(mapper.selectCte()));
+    }
+
+    @Test
+    void cteWithTheSameNameAsAPhysicalTableStillGetsThePredicate() {
+        // H2 2.1.214 ignores predicates inside a CTE that shadows a physical
+        // table, even 1 = 0, so this case is checked at the rewrite level.
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        String sql = SqlConditionBuilder.apply(
+                "with sim_project as (select * from PUBLIC.sim_project) select id from sim_project",
+                Collections.singletonList(rule), Collections.emptyMap(), null, null, true);
+
+        assertTrue(sql.contains("FROM PUBLIC.sim_project WHERE"));
+        assertTrue(sql.contains("PUBLIC.sim_project.dept_id = '100'"));
+        assertFalse(sql.contains("FROM sim_project WHERE 1 = 0"));
+    }
+
+    @Test
+    void laterCteSeesTheFilteredEarlierCte() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Arrays.asList(101L, 102L, 103L), ids(mapper.selectEarlierCteFromLaterCte()));
+    }
+
+    @Test
+    void cteNestedInsideCteBodyIsFiltered() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Arrays.asList(101L, 102L, 103L), ids(mapper.selectCteNestedInsideCte()));
+    }
+
+    @Test
+    void cteInsideScalarSubqueryIsFiltered() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Long.valueOf(3L), mapper.selectCteInsideScalarSubquery());
+    }
+
+    @Test
+    void recursiveCteFiltersEveryPhysicalTableReference() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Arrays.asList(101L, 102L, 103L), mapper.selectRecursiveCte());
+    }
+
+    @Test
+    void nonFirstRecursiveCteSeesItself() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Arrays.asList(101L, 102L, 103L), mapper.selectRecursiveCteNotFirst());
+    }
+
+    @Test
+    void nonRecursiveSelfReferenceStaysPhysical() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        String sql = SqlConditionBuilder.apply(
+                "with sim_project as (select * from sim_project) select id from sim_project",
+                Collections.singletonList(rule), Collections.emptyMap(), null, null, true);
+
+        assertTrue(sql.contains("FROM sim_project WHERE"));
+        assertTrue(sql.contains("sim_project.dept_id = '100'"));
+    }
+
+    @Test
+    void subJoinIsDeniedWithoutRules() {
+        setSubject(100L, "u1");
+
+        assertNull(mapper.selectSubJoinScalarTotal());
+    }
+
+    @Test
+    void subJoinFiltersEveryNestedTableInstance() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Collections.singletonList(101L), mapper.selectSubJoinIds());
+    }
+
+    @Test
+    void nestedCteIsFilteredWithoutDenyingItsMainQuery() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Arrays.asList(101L, 102L, 103L), ids(mapper.selectNestedCte()));
+    }
+
+    @Test
+    void valuesCteSubqueryIsFiltered() {
+        DataPermissionRule rule = simpleOnTable("sim_project", "dept_id", "=", "100");
+        String sql = SqlConditionBuilder.apply(
+                "with c as (values ((select count(*) from sim_project))) select * from c",
+                Collections.singletonList(rule), Collections.emptyMap(), null, null, true);
+
+        assertTrue(sql.contains("FROM sim_project WHERE"));
+        assertTrue(sql.contains("sim_project.dept_id = '100'"));
+        assertFalse(sql.contains("FROM c WHERE 1 = 0"));
+    }
+
+    @Test
+    void noRulesDeniesTheOuterTableEvenWhenASubqueryWasRewritten() {
+        setSubject(100L, "u1");
+
+        assertNull(mapper.selectScalarSubqueryCount());
+    }
+
+    @Test
+    void foreachParametersSurviveRewriting() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Arrays.asList(101L, 102L),
+                ids(mapper.selectByIds(Arrays.asList(101L, 102L, 104L))));
+    }
+
+    @Test
+    void bindParametersSurviveRewriting() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        assertEquals(Arrays.asList(101L, 102L, 103L), ids(mapper.selectWithBind(100L)));
+    }
+
+    @Test
+    void foreachParametersSurvivePageHelperCount() {
+        useSimple("dept_id", "=", "#{deptId}");
+        setSubject(100L, "u1");
+
+        PageHelper.startPage(1, 1);
+        List<SimProject> rows = mapper.selectByIds(Arrays.asList(101L, 102L, 104L));
+        PageInfo<SimProject> page = new PageInfo<SimProject>(rows);
+
+        assertEquals(2L, page.getTotal());
+        assertEquals(Collections.singletonList(101L), ids(rows));
+    }
+
+    @Test
+    void quotedStringConstantIsEmittedOnce() {
+        useSimple("status", "=", "'A'");
+        setSubject(100L, "u1");
+
+        assertEquals(Arrays.asList(101L, 103L, 105L, 106L), ids(mapper.selectAll()));
+    }
+
+    @Test
+    void quotedConstantWithEmbeddedQuoteIsEscaped() {
+        jdbc.update("update sim_project set name = 'O''Brien' where id = 101",
+                new MapSqlParameterSource());
+        useSimple("name", "=", "'O''Brien'");
+        setSubject(100L, "u1");
+
+        assertEquals(Collections.singletonList(101L), ids(mapper.selectAll()));
+    }
+
+    @Test
+    void quotedConstantWinsOverAUserFieldWithTheSameName() {
+        useSimple("create_by", "=", "'u1'");
+        DataPermissionContext.setSubject(SimpleDataPermissionSubject.builder()
+                .subjectId("quoted-constant-tester")
+                .roleId(ROLE)
+                .field("u1", "u9")
+                .build());
+
+        assertEquals(Collections.singletonList(104L), ids(mapper.selectAll()));
     }
 
     @Test

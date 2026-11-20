@@ -12,6 +12,7 @@ import com.ty.dp.core.util.Reflections;
 import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.expression.DoubleValue;
 import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.expression.ExpressionVisitorAdapter;
 import net.sf.jsqlparser.expression.LongValue;
 import net.sf.jsqlparser.expression.Parenthesis;
 import net.sf.jsqlparser.expression.StringValue;
@@ -23,9 +24,12 @@ import net.sf.jsqlparser.expression.operators.relational.GreaterThan;
 import net.sf.jsqlparser.expression.operators.relational.GreaterThanEquals;
 import net.sf.jsqlparser.expression.operators.relational.InExpression;
 import net.sf.jsqlparser.expression.operators.relational.IsNullExpression;
+import net.sf.jsqlparser.expression.operators.relational.ItemsList;
 import net.sf.jsqlparser.expression.operators.relational.LikeExpression;
 import net.sf.jsqlparser.expression.operators.relational.MinorThan;
 import net.sf.jsqlparser.expression.operators.relational.MinorThanEquals;
+import net.sf.jsqlparser.expression.operators.relational.MultiExpressionList;
+import net.sf.jsqlparser.expression.operators.relational.NamedExpressionList;
 import net.sf.jsqlparser.expression.operators.relational.NotEqualsTo;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Column;
@@ -33,11 +37,19 @@ import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.select.FromItem;
 import net.sf.jsqlparser.statement.select.Join;
+import net.sf.jsqlparser.statement.select.OrderByElement;
+import net.sf.jsqlparser.statement.select.ParenthesisFromItem;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
 import net.sf.jsqlparser.statement.select.SelectBody;
+import net.sf.jsqlparser.statement.select.SelectExpressionItem;
+import net.sf.jsqlparser.statement.select.SelectItem;
 import net.sf.jsqlparser.statement.select.SetOperationList;
+import net.sf.jsqlparser.statement.select.SpecialSubSelect;
+import net.sf.jsqlparser.statement.select.SubJoin;
 import net.sf.jsqlparser.statement.select.SubSelect;
+import net.sf.jsqlparser.statement.select.TableFunction;
+import net.sf.jsqlparser.statement.select.WithItem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -126,8 +138,124 @@ public final class SqlConditionBuilder {
                                        DataPermissionSubject subject,
                                        Object parameter,
                                        boolean denyWhenEmpty) {
-        SelectBody body = select.getSelectBody();
-        return addToBody(body, rules, annotationAliases, subject, parameter, denyWhenEmpty);
+        return addToWithItems(select.getWithItemsList(), select.getSelectBody(),
+                rules, annotationAliases, subject, parameter, denyWhenEmpty,
+                Collections.<String>emptySet());
+    }
+
+    /**
+     * Rewrites one SQL scope: every WITH item, then the body that can see all
+     * of them. A CTE name is visible to later items and to the main body, but
+     * not inside its own definition unless it is recursive.
+     */
+    private static boolean addToWithItems(List<WithItem> withItems,
+                                          SelectBody body,
+                                          List<DataPermissionRule> rules,
+                                          Map<String, String> annotationAliases,
+                                          DataPermissionSubject subject,
+                                          Object parameter,
+                                          boolean denyWhenEmpty,
+                                          Set<String> outerCteNames) {
+        boolean changed = false;
+        Set<String> visibleCtes = new LinkedHashSet<String>();
+        if (outerCteNames != null) {
+            visibleCtes.addAll(outerCteNames);
+        }
+        boolean recursiveWith = false;
+        if (withItems != null) {
+            for (WithItem withItem : withItems) {
+                if (withItem != null && withItem.isRecursive()) {
+                    recursiveWith = true;
+                    break;
+                }
+            }
+        }
+        if (withItems != null) {
+            for (WithItem withItem : withItems) {
+                if (withItem == null) {
+                    continue;
+                }
+                String name = normalize(withItem.getName());
+                Set<String> itemVisible = new LinkedHashSet<String>(visibleCtes);
+                // JSQLParser 4.6 marks only the first item of a WITH RECURSIVE
+                // clause, so treat every item as potentially self-referencing.
+                if (recursiveWith && !name.isEmpty()) {
+                    itemVisible.add(name);
+                }
+                if (withItem.getSubSelect() != null) {
+                    changed |= addToSubSelect(withItem.getSubSelect(),
+                            rules, annotationAliases, subject, parameter, denyWhenEmpty, itemVisible);
+                }
+                changed |= scanItemsList(withItem.getItemsList(),
+                        rules, annotationAliases, subject, parameter, denyWhenEmpty, itemVisible);
+                if (!name.isEmpty()) {
+                    visibleCtes.add(name);
+                }
+            }
+        }
+        changed |= addToBody(body,
+                rules, annotationAliases, subject, parameter, denyWhenEmpty, visibleCtes);
+        return changed;
+    }
+
+    private static boolean addToSubSelect(SubSelect subSelect,
+                                          List<DataPermissionRule> rules,
+                                          Map<String, String> annotationAliases,
+                                          DataPermissionSubject subject,
+                                          Object parameter,
+                                          boolean denyWhenEmpty,
+                                          Set<String> outerCteNames) {
+        if (subSelect == null) {
+            return false;
+        }
+        return addToWithItems(subSelect.getWithItemsList(), subSelect.getSelectBody(),
+                rules, annotationAliases, subject, parameter, denyWhenEmpty, outerCteNames);
+    }
+
+    /**
+     * A CTE body can be a VALUES list rather than a subquery; those expressions
+     * can still contain subqueries that must be rewritten.
+     */
+    private static boolean scanItemsList(ItemsList items,
+                                         List<DataPermissionRule> rules,
+                                         Map<String, String> annotationAliases,
+                                         DataPermissionSubject subject,
+                                         Object parameter,
+                                         boolean denyWhenEmpty,
+                                         Set<String> cteNames) {
+        if (items == null) {
+            return false;
+        }
+        SubqueryScan scan = new SubqueryScan();
+        SubqueryExpressionVisitor visitor = new SubqueryExpressionVisitor(
+                rules, annotationAliases, subject, parameter, denyWhenEmpty, cteNames, scan);
+        scanItems(items, visitor);
+        return scan.changed;
+    }
+
+    private static void scanItems(ItemsList items, SubqueryExpressionVisitor visitor) {
+        if (items instanceof ExpressionList) {
+            scanExpressions(((ExpressionList) items).getExpressions(), visitor);
+        } else if (items instanceof MultiExpressionList) {
+            List<ExpressionList> lists = ((MultiExpressionList) items).getExpressionLists();
+            if (lists != null) {
+                for (ExpressionList list : lists) {
+                    scanItems(list, visitor);
+                }
+            }
+        } else if (items instanceof NamedExpressionList) {
+            scanExpressions(((NamedExpressionList) items).getExpressions(), visitor);
+        }
+    }
+
+    private static void scanExpressions(List<Expression> expressions,
+                                        SubqueryExpressionVisitor visitor) {
+        if (expressions == null) {
+            return;
+        }
+        for (Expression expression : expressions) {
+            visitor.scan(expression);
+        }
     }
 
     private static boolean addToBody(SelectBody body,
@@ -135,21 +263,37 @@ public final class SqlConditionBuilder {
                                      Map<String, String> annotationAliases,
                                      DataPermissionSubject subject,
                                      Object parameter,
-                                     boolean denyWhenEmpty) {
+                                     boolean denyWhenEmpty,
+                                     Set<String> cteNames) {
         if (body instanceof PlainSelect) {
-            PlainSelect plainSelect = (PlainSelect) body;
-            if (plainSelect.getFromItem() instanceof SubSelect) {
-                // PageHelper count wrapper: SELECT count(0) FROM (original) table_count
-                SelectBody inner = ((SubSelect) plainSelect.getFromItem()).getSelectBody();
-                return addToBody(inner, rules, annotationAliases, subject, parameter, denyWhenEmpty);
-            }
-            return addToPlainSelect(plainSelect, rules, annotationAliases, subject, parameter, denyWhenEmpty);
+            return addToPlainSelect((PlainSelect) body,
+                    rules, annotationAliases, subject, parameter, denyWhenEmpty, cteNames);
         }
         if (body instanceof SetOperationList) {
+            SetOperationList setOperationList = (SetOperationList) body;
             boolean changed = false;
-            for (SelectBody selectBody : ((SetOperationList) body).getSelects()) {
-                changed |= addToBody(selectBody, rules, annotationAliases, subject, parameter, denyWhenEmpty);
+            if (setOperationList.getSelects() != null) {
+                for (SelectBody selectBody : setOperationList.getSelects()) {
+                    changed |= addToBody(selectBody,
+                            rules, annotationAliases, subject, parameter, denyWhenEmpty, cteNames);
+                }
             }
+            SubqueryScan scan = new SubqueryScan();
+            SubqueryExpressionVisitor visitor = new SubqueryExpressionVisitor(
+                    rules, annotationAliases, subject, parameter, denyWhenEmpty, cteNames, scan);
+            if (setOperationList.getOrderByElements() != null) {
+                for (OrderByElement orderBy : setOperationList.getOrderByElements()) {
+                    visitor.scan(orderBy.getExpression());
+                }
+            }
+            if (setOperationList.getLimit() != null) {
+                visitor.scan(setOperationList.getLimit().getOffset());
+                visitor.scan(setOperationList.getLimit().getRowCount());
+            }
+            if (setOperationList.getOffset() != null) {
+                visitor.scan(setOperationList.getOffset().getOffset());
+            }
+            changed |= scan.changed;
             return changed;
         }
         return false;
@@ -160,18 +304,158 @@ public final class SqlConditionBuilder {
                                             Map<String, String> annotationAliases,
                                             DataPermissionSubject subject,
                                             Object parameter,
-                                            boolean denyWhenEmpty) {
-        Set<String> tables = extractTables(plainSelect);
-        Map<String, String> actualAliases = extractAliases(plainSelect);
-        Map<String, String> aliases = mergeAliases(actualAliases, annotationAliases);
+                                            boolean denyWhenEmpty,
+                                            Set<String> cteNames) {
+        QueryScope scope = buildScope(plainSelect, annotationAliases, cteNames);
+        Map<String, List<DataPermissionRule>> rulesByTable = groupRules(rules, scope, cteNames);
 
-        Map<String, List<DataPermissionRule>> rulesByTable = new LinkedHashMap<String, List<DataPermissionRule>>();
+        Expression permission = null;
+        for (Map.Entry<String, List<DataPermissionRule>> entry : rulesByTable.entrySet()) {
+            for (TableInstance instance : scope.instances) {
+                if (!instance.tableName.equals(entry.getKey())
+                        || !isPhysical(instance, cteNames)) {
+                    continue;
+                }
+                // A self-join has one instance per alias: every instance must be
+                // filtered, otherwise the duplicated table can leak rows.
+                Expression condition = buildTableCondition(entry.getValue(), instance, scope,
+                        subject, parameter);
+                permission = permission == null
+                        ? condition
+                        : new AndExpression(new Parenthesis(permission), new Parenthesis(condition));
+            }
+        }
+
+        boolean changed = permission != null;
+        if (permission != null) {
+            Expression where = plainSelect.getWhere();
+            plainSelect.setWhere(where == null
+                    ? permission
+                    : new AndExpression(new Parenthesis(permission), new Parenthesis(where)));
+        }
+
+        SubqueryScan scan = new SubqueryScan();
+        processSubqueries(plainSelect, rules, annotationAliases, subject, parameter,
+                denyWhenEmpty, cteNames, scan);
+        changed |= scan.changed;
+
+        if (permission == null && denyWhenEmpty) {
+            // A physical table without a rule still needs the outer deny, even
+            // when a subquery was rewritten. Only a scope made entirely of CTE
+            // references (whose bodies were rewritten) or a derived-table scope
+            // with a rewritten subquery may pass through.
+            if (hasPhysicalTables(scope, cteNames)
+                    || (!onlyCteTables(scope, cteNames) && !scan.changed)) {
+                Expression where = plainSelect.getWhere();
+                Expression denied = falseExpression();
+                plainSelect.setWhere(where == null
+                        ? denied
+                        : new AndExpression(new Parenthesis(denied), new Parenthesis(where)));
+            }
+            changed = true;
+        }
+        return changed;
+    }
+
+    private static QueryScope buildScope(PlainSelect plainSelect,
+                                         Map<String, String> annotationAliases,
+                                         Set<String> cteNames) {
+        QueryScope scope = new QueryScope();
+        addScopeTable(plainSelect.getFromItem(), scope, null);
+        List<Join> joins = plainSelect.getJoins();
+        if (joins != null) {
+            for (Join join : joins) {
+                addScopeTable(join.getRightItem(), scope, null);
+            }
+        }
+        applyAnnotationAliases(scope, annotationAliases, cteNames);
+        return scope;
+    }
+
+    private static void addScopeTable(FromItem fromItem, QueryScope scope, String outerAlias) {
+        if (fromItem instanceof Table) {
+            Table table = (Table) fromItem;
+            String alias = table.getAlias() != null
+                    ? table.getAlias().getName()
+                    : (isQualified(table) ? table.getFullyQualifiedName() : table.getName());
+            if (outerAlias != null && !outerAlias.trim().isEmpty()) {
+                alias = outerAlias;
+            }
+            scope.add(new TableInstance(normalize(table.getName()), alias, isQualified(table)));
+        } else if (fromItem instanceof ParenthesisFromItem) {
+            ParenthesisFromItem parenthesis = (ParenthesisFromItem) fromItem;
+            String alias = parenthesis.getAlias() != null
+                    ? parenthesis.getAlias().getName()
+                    : outerAlias;
+            addScopeTable(parenthesis.getFromItem(), scope, alias);
+        } else if (fromItem instanceof SubJoin) {
+            SubJoin subJoin = (SubJoin) fromItem;
+            // The SubJoin alias names the derived join result, not the inner
+            // tables, so their own aliases must be preserved.
+            addScopeTable(subJoin.getLeft(), scope, null);
+            List<Join> subJoins = subJoin.getJoinList();
+            if (subJoins != null) {
+                for (Join join : subJoins) {
+                    addScopeTable(join.getRightItem(), scope, null);
+                }
+            }
+        } else if (fromItem instanceof SubSelect || fromItem instanceof SpecialSubSelect
+                || fromItem instanceof TableFunction) {
+            // Derived table or table function: subqueries are handled by
+            // scanFromItem; there is no physical table in this scope.
+        } else if (fromItem != null) {
+            throw new DataPermissionException("Unsupported FROM item for data permission: "
+                    + fromItem.getClass().getName());
+        }
+    }
+
+    private static void applyAnnotationAliases(QueryScope scope,
+                                               Map<String, String> annotationAliases,
+                                               Set<String> cteNames) {
+        if (annotationAliases == null || annotationAliases.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, String> entry : annotationAliases.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null
+                    || entry.getValue().trim().isEmpty()) {
+                continue;
+            }
+            String table = normalize(entry.getKey());
+            List<TableInstance> instances = physicalInstances(scope.byTable.get(table), cteNames);
+            if (instances.isEmpty()) {
+                continue;
+            }
+            if (instances.size() > 1) {
+                throw new DataPermissionException("Data permission tableAlias for table '" + table
+                        + "' is ambiguous: the table appears " + instances.size()
+                        + " times in the same query");
+            }
+            TableInstance instance = instances.get(0);
+            instance.effectiveAlias = entry.getValue().trim();
+            scope.byAlias.put(normalize(instance.effectiveAlias), instance);
+        }
+    }
+
+    private static Map<String, List<DataPermissionRule>> groupRules(List<DataPermissionRule> rules,
+                                                                    QueryScope scope,
+                                                                    Set<String> cteNames) {
+        Map<String, List<DataPermissionRule>> rulesByTable =
+                new LinkedHashMap<String, List<DataPermissionRule>>();
+        if (rules == null) {
+            return rulesByTable;
+        }
+        Set<String> physicalTables = new LinkedHashSet<String>();
+        for (TableInstance instance : scope.instances) {
+            if (isPhysical(instance, cteNames)) {
+                physicalTables.add(instance.tableName);
+            }
+        }
         for (DataPermissionRule rule : rules) {
             if (rule == null || !rule.isEnabled()) {
                 continue;
             }
             String table = normalize(rule.getTableName());
-            if (table.isEmpty() || !tables.contains(table)) {
+            if (table.isEmpty() || !physicalTables.contains(table)) {
                 continue;
             }
             List<DataPermissionRule> list = rulesByTable.get(table);
@@ -181,100 +465,156 @@ public final class SqlConditionBuilder {
             }
             list.add(rule);
         }
+        return rulesByTable;
+    }
 
-        Expression permission = null;
-        for (Map.Entry<String, List<DataPermissionRule>> entry : rulesByTable.entrySet()) {
-            String table = entry.getKey();
-            String alias = aliases.get(table);
-            if (alias == null || alias.isEmpty()) {
-                alias = table;
-            }
-            Expression condition = buildTableCondition(entry.getValue(), alias, aliases, subject, parameter);
-            permission = permission == null
-                    ? condition
-                    : new AndExpression(new Parenthesis(permission), new Parenthesis(condition));
+    private static boolean onlyCteTables(QueryScope scope, Set<String> cteNames) {
+        if (scope.instances.isEmpty() || cteNames == null || cteNames.isEmpty()) {
+            return false;
         }
-
-        if (permission == null) {
-            if (!denyWhenEmpty) {
+        for (TableInstance instance : scope.instances) {
+            if (isPhysical(instance, cteNames)) {
                 return false;
             }
-            permission = falseExpression();
         }
-
-        Expression where = plainSelect.getWhere();
-        plainSelect.setWhere(where == null
-                ? permission
-                : new AndExpression(new Parenthesis(permission), new Parenthesis(where)));
         return true;
     }
 
-    private static Set<String> extractTables(PlainSelect plainSelect) {
-        Set<String> tables = new LinkedHashSet<String>();
-        FromItem fromItem = plainSelect.getFromItem();
-        if (fromItem instanceof Table) {
-            tables.add(normalize(((Table) fromItem).getName()));
+    private static boolean hasPhysicalTables(QueryScope scope, Set<String> cteNames) {
+        for (TableInstance instance : scope.instances) {
+            if (isPhysical(instance, cteNames)) {
+                return true;
+            }
         }
+        return false;
+    }
+
+    private static List<TableInstance> physicalInstances(List<TableInstance> instances,
+                                                         Set<String> cteNames) {
+        if (instances == null || instances.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<TableInstance> physical = new ArrayList<TableInstance>(instances.size());
+        for (TableInstance instance : instances) {
+            if (isPhysical(instance, cteNames)) {
+                physical.add(instance);
+            }
+        }
+        return physical;
+    }
+
+    private static boolean isPhysical(TableInstance instance, Set<String> cteNames) {
+        // A schema-qualified table is a physical table even when an unqualified
+        // CTE of the same short name is visible in the same scope.
+        return instance.qualified || cteNames == null || !cteNames.contains(instance.tableName);
+    }
+
+    private static boolean isQualified(Table table) {
+        if (!isBlank(table.getSchemaName())) {
+            return true;
+        }
+        String name = table.getName();
+        return name != null && name.indexOf('.') >= 0;
+    }
+
+    private static void processSubqueries(PlainSelect plainSelect,
+                                          List<DataPermissionRule> rules,
+                                          Map<String, String> annotationAliases,
+                                          DataPermissionSubject subject,
+                                          Object parameter,
+                                          boolean denyWhenEmpty,
+                                          Set<String> cteNames,
+                                          SubqueryScan scan) {
+        SubqueryExpressionVisitor visitor = new SubqueryExpressionVisitor(
+                rules, annotationAliases, subject, parameter, denyWhenEmpty, cteNames, scan);
+        scanFromItem(plainSelect.getFromItem(), visitor, rules, annotationAliases,
+                subject, parameter, denyWhenEmpty, cteNames, scan);
         List<Join> joins = plainSelect.getJoins();
         if (joins != null) {
             for (Join join : joins) {
-                FromItem item = join.getRightItem();
-                if (item instanceof Table) {
-                    tables.add(normalize(((Table) item).getName()));
+                scanFromItem(join.getRightItem(), visitor, rules, annotationAliases,
+                        subject, parameter, denyWhenEmpty, cteNames, scan);
+                if (join.getOnExpressions() != null) {
+                    for (Expression onExpression : join.getOnExpressions()) {
+                        visitor.scan(onExpression);
+                    }
                 }
             }
         }
-        return tables;
+        if (plainSelect.getSelectItems() != null) {
+            for (SelectItem selectItem : plainSelect.getSelectItems()) {
+                if (selectItem instanceof SelectExpressionItem) {
+                    visitor.scan(((SelectExpressionItem) selectItem).getExpression());
+                }
+            }
+        }
+        visitor.scan(plainSelect.getWhere());
+        visitor.scan(plainSelect.getHaving());
+        if (plainSelect.getGroupBy() != null
+                && plainSelect.getGroupBy().getGroupByExpressions() != null) {
+            for (Expression expression : plainSelect.getGroupBy().getGroupByExpressions()) {
+                visitor.scan(expression);
+            }
+        }
+        if (plainSelect.getOrderByElements() != null) {
+            for (OrderByElement orderBy : plainSelect.getOrderByElements()) {
+                visitor.scan(orderBy.getExpression());
+            }
+        }
+        if (plainSelect.getLimit() != null) {
+            visitor.scan(plainSelect.getLimit().getOffset());
+            visitor.scan(plainSelect.getLimit().getRowCount());
+        }
+        if (plainSelect.getOffset() != null) {
+            visitor.scan(plainSelect.getOffset().getOffset());
+        }
     }
 
-    private static Map<String, String> extractAliases(PlainSelect plainSelect) {
-        Map<String, String> aliases = new LinkedHashMap<String, String>();
-        FromItem fromItem = plainSelect.getFromItem();
-        if (fromItem instanceof Table) {
-            putAlias(aliases, (Table) fromItem);
-        }
-        List<Join> joins = plainSelect.getJoins();
-        if (joins != null) {
-            for (Join join : joins) {
-                FromItem item = join.getRightItem();
-                if (item instanceof Table) {
-                    putAlias(aliases, (Table) item);
+    private static void scanFromItem(FromItem fromItem,
+                                     SubqueryExpressionVisitor visitor,
+                                     List<DataPermissionRule> rules,
+                                     Map<String, String> annotationAliases,
+                                     DataPermissionSubject subject,
+                                     Object parameter,
+                                     boolean denyWhenEmpty,
+                                     Set<String> cteNames,
+                                     SubqueryScan scan) {
+        if (fromItem instanceof SubSelect) {
+            scan.changed |= addToSubSelect((SubSelect) fromItem,
+                    rules, annotationAliases, subject, parameter, denyWhenEmpty, cteNames);
+        } else if (fromItem instanceof SpecialSubSelect) {
+            SubSelect subSelect = ((SpecialSubSelect) fromItem).getSubSelect();
+            if (subSelect != null) {
+                scan.changed |= addToSubSelect(subSelect,
+                        rules, annotationAliases, subject, parameter, denyWhenEmpty, cteNames);
+            }
+        } else if (fromItem instanceof TableFunction) {
+            visitor.scan(((TableFunction) fromItem).getFunction());
+        } else if (fromItem instanceof SubJoin) {
+            SubJoin subJoin = (SubJoin) fromItem;
+            scanFromItem(subJoin.getLeft(), visitor, rules, annotationAliases,
+                    subject, parameter, denyWhenEmpty, cteNames, scan);
+            List<Join> subJoins = subJoin.getJoinList();
+            if (subJoins != null) {
+                for (Join join : subJoins) {
+                    scanFromItem(join.getRightItem(), visitor, rules, annotationAliases,
+                            subject, parameter, denyWhenEmpty, cteNames, scan);
+                    if (join.getOnExpressions() != null) {
+                        for (Expression onExpression : join.getOnExpressions()) {
+                            visitor.scan(onExpression);
+                        }
+                    }
                 }
             }
+        } else if (fromItem instanceof ParenthesisFromItem) {
+            scanFromItem(((ParenthesisFromItem) fromItem).getFromItem(), visitor,
+                    rules, annotationAliases, subject, parameter, denyWhenEmpty, cteNames, scan);
         }
-        return aliases;
-    }
-
-    private static void putAlias(Map<String, String> aliases, Table table) {
-        String name = normalize(table.getName());
-        String alias = table.getAlias() != null ? table.getAlias().getName() : table.getName();
-        aliases.put(name, alias);
-    }
-
-    private static Map<String, String> mergeAliases(Map<String, String> actualAliases,
-                                                    Map<String, String> annotationAliases) {
-        Map<String, String> aliases = new LinkedHashMap<String, String>();
-        if (actualAliases != null) {
-            for (Map.Entry<String, String> entry : actualAliases.entrySet()) {
-                if (entry.getKey() != null && entry.getValue() != null) {
-                    aliases.put(normalize(entry.getKey()), entry.getValue());
-                }
-            }
-        }
-        if (annotationAliases != null) {
-            for (Map.Entry<String, String> entry : annotationAliases.entrySet()) {
-                if (entry.getKey() != null && entry.getValue() != null
-                        && !entry.getValue().trim().isEmpty()) {
-                    aliases.put(normalize(entry.getKey()), entry.getValue().trim());
-                }
-            }
-        }
-        return aliases;
     }
 
     private static Expression buildTableCondition(List<DataPermissionRule> rules,
-                                                  String alias,
-                                                  Map<String, String> aliases,
+                                                  TableInstance instance,
+                                                  QueryScope scope,
                                                   DataPermissionSubject subject,
                                                   Object parameter) {
         List<DataPermissionRule> sorted = new ArrayList<DataPermissionRule>(rules);
@@ -297,7 +637,7 @@ public final class SqlConditionBuilder {
 
         Expression combined = null;
         for (DataPermissionRule rule : sorted) {
-            Expression current = buildRuleCondition(rule, alias, aliases, subject, parameter);
+            Expression current = buildRuleCondition(rule, instance, scope, subject, parameter);
             if (current == null) {
                 current = falseExpression();
             }
@@ -311,21 +651,21 @@ public final class SqlConditionBuilder {
     }
 
     private static Expression buildRuleCondition(DataPermissionRule rule,
-                                                 String alias,
-                                                 Map<String, String> aliases,
+                                                 TableInstance instance,
+                                                 QueryScope scope,
                                                  DataPermissionSubject subject,
                                                  Object parameter) {
         if (rule.getRuleMode() == RuleMode.COMPLEX
                 && rule.getItems() != null
                 && !rule.getItems().isEmpty()) {
-            return buildComplexCondition(rule, alias, aliases, subject, parameter);
+            return buildComplexCondition(rule, instance, scope, subject, parameter);
         }
-        return buildSimpleCondition(rule, alias, aliases, subject, parameter);
+        return buildSimpleCondition(rule, instance, scope, subject, parameter);
     }
 
     private static Expression buildSimpleCondition(DataPermissionRule rule,
-                                                   String alias,
-                                                   Map<String, String> aliases,
+                                                   TableInstance instance,
+                                                   QueryScope scope,
                                                    DataPermissionSubject subject,
                                                    Object parameter) {
         ConditionOperator operator = ConditionOperator.from(rule.getConditionType());
@@ -333,7 +673,7 @@ public final class SqlConditionBuilder {
             log.warn("Data permission rule [{}] has an invalid field or operator", rule.getId());
             return null;
         }
-        Column column = createColumn(rule.getFieldName(), alias, aliases);
+        Column column = createColumn(rule.getFieldName(), instance, scope);
         if (column == null) {
             log.warn("Data permission rule [{}] has an invalid column: {}", rule.getId(), rule.getFieldName());
             return null;
@@ -361,8 +701,8 @@ public final class SqlConditionBuilder {
     }
 
     private static Expression buildComplexCondition(DataPermissionRule rule,
-                                                    String alias,
-                                                    Map<String, String> aliases,
+                                                    TableInstance instance,
+                                                    QueryScope scope,
                                                     DataPermissionSubject subject,
                                                     Object parameter) {
         List<DataPermissionRuleItem> items = new ArrayList<DataPermissionRuleItem>(rule.getItems());
@@ -411,7 +751,7 @@ public final class SqlConditionBuilder {
             for (List<DataPermissionRuleItem> subGroup : subGroups.values()) {
                 Expression subExpression = null;
                 for (DataPermissionRuleItem item : subGroup) {
-                    Expression current = buildItemCondition(item, alias, aliases, subject, parameter);
+                    Expression current = buildItemCondition(item, instance, scope, subject, parameter);
                     if (current == null) {
                         current = falseExpression();
                     }
@@ -446,8 +786,8 @@ public final class SqlConditionBuilder {
     }
 
     private static Expression buildItemCondition(DataPermissionRuleItem item,
-                                                 String alias,
-                                                 Map<String, String> aliases,
+                                                 TableInstance instance,
+                                                 QueryScope scope,
                                                  DataPermissionSubject subject,
                                                  Object parameter) {
         ConditionOperator operator = ConditionOperator.from(item.getOperator());
@@ -455,7 +795,7 @@ public final class SqlConditionBuilder {
             log.warn("Data permission rule item [{}] has an invalid operator: {}", item.getId(), item.getOperator());
             return null;
         }
-        Column left = createColumn(item.getLeftExpr(), alias, aliases);
+        Column left = createColumn(item.getLeftExpr(), instance, scope);
         if (left == null) {
             log.warn("Data permission rule item [{}] has an invalid left expression: {}", item.getId(), item.getLeftExpr());
             return null;
@@ -469,7 +809,7 @@ public final class SqlConditionBuilder {
 
         RightValueType rightType = item.getRightType() == null ? RightValueType.CONST : item.getRightType();
         if (rightType == RightValueType.FIELD) {
-            Column right = createColumn(item.getRightExpr(), alias, aliases);
+            Column right = createColumn(item.getRightExpr(), instance, scope);
             if (right == null) {
                 log.warn("Data permission rule item [{}] has an invalid right expression: {}", item.getId(), item.getRightExpr());
                 return null;
@@ -513,6 +853,12 @@ public final class SqlConditionBuilder {
         if (value.isEmpty()) {
             return UNRESOLVED;
         }
+        String literal = unquoteLiteral(value);
+        if (literal != null) {
+            // A single quoted constant is never resolved as a user field:
+            // 'PENDING' means the string PENDING, even if a field has that name.
+            return literal;
+        }
         Matcher matcher = DYNAMIC_VALUE.matcher(value);
         if (matcher.matches()) {
             Object resolved = resolveField(matcher.group(1), subject, parameter);
@@ -544,7 +890,11 @@ public final class SqlConditionBuilder {
             String text = String.valueOf(value);
             String[] parts = text.split(",");
             for (String part : parts) {
-                String item = stripQuotes(part.trim());
+                String trimmed = part.trim();
+                String item = unquoteLiteral(trimmed);
+                if (item == null) {
+                    item = trimmed;
+                }
                 if (!item.isEmpty()) {
                     values.add(createValueExpression(item));
                 }
@@ -606,7 +956,7 @@ public final class SqlConditionBuilder {
         return new StringValue(escape(String.valueOf(value)));
     }
 
-    private static Column createColumn(String expression, String alias, Map<String, String> aliases) {
+    private static Column createColumn(String expression, TableInstance instance, QueryScope scope) {
         if (isBlank(expression)) {
             return null;
         }
@@ -616,16 +966,37 @@ public final class SqlConditionBuilder {
             if (parts.length != 2 || !isIdentifier(parts[0]) || !isIdentifier(parts[1])) {
                 return null;
             }
-            String mapped = aliases == null ? null : aliases.get(normalize(parts[0]));
-            if (mapped != null && !mapped.isEmpty()) {
-                return new Column(mapped + "." + parts[1]);
+            String qualifier = normalize(parts[0]);
+            TableInstance aliased = scope == null ? null : scope.byAlias.get(qualifier);
+            if (aliased != null) {
+                if (instance != null && aliased.tableName.equals(instance.tableName)) {
+                    // The qualifier names this table's alias; expand it per
+                    // instance so a self-join filters every alias.
+                    return new Column(instance.effectiveAlias + "." + parts[1]);
+                }
+                // An explicit alias of another table wins; it may refer to an
+                // outer scope.
+                return new Column(parts[0] + "." + parts[1]);
+            }
+            if (scope != null) {
+                List<TableInstance> instances = scope.byTable.get(qualifier);
+                if (instances != null && !instances.isEmpty()) {
+                    if (instance != null && instance.tableName.equals(qualifier)) {
+                        return new Column(instance.effectiveAlias + "." + parts[1]);
+                    }
+                    if (instances.size() == 1) {
+                        return new Column(instances.get(0).effectiveAlias + "." + parts[1]);
+                    }
+                    throw new DataPermissionException("Ambiguous table reference '" + parts[0]
+                            + "' in data permission rule");
+                }
             }
             return new Column(parts[0] + "." + parts[1]);
         }
-        if (!isIdentifier(raw)) {
+        if (!isIdentifier(raw) || instance == null) {
             return null;
         }
-        return new Column(alias + "." + raw);
+        return new Column(instance.effectiveAlias + "." + raw);
     }
 
     private static Expression falseExpression() {
@@ -654,15 +1025,36 @@ public final class SqlConditionBuilder {
         return value != null && IDENTIFIER.matcher(value).matches();
     }
 
-    private static String stripQuotes(String value) {
-        if (value.length() >= 2) {
-            char first = value.charAt(0);
-            char last = value.charAt(value.length() - 1);
-            if ((first == '\'' && last == '\'') || (first == '"' && last == '"')) {
-                return value.substring(1, value.length() - 1);
+    /**
+     * Returns the unquoted content when {@code value} is exactly one quoted
+     * literal; returns {@code null} for anything else (for example an IN list
+     * such as {@code 'A','B'}, which is split by the caller).
+     */
+    private static String unquoteLiteral(String value) {
+        if (value == null || value.length() < 2) {
+            return null;
+        }
+        char quote = value.charAt(0);
+        if (quote != '\'' && quote != '"') {
+            return null;
+        }
+        StringBuilder result = new StringBuilder(value.length() - 2);
+        for (int i = 1; i < value.length(); i++) {
+            char current = value.charAt(i);
+            if (current == quote) {
+                if (i + 1 < value.length() && value.charAt(i + 1) == quote) {
+                    result.append(quote);
+                    i++;
+                } else if (i == value.length() - 1) {
+                    return result.toString();
+                } else {
+                    return null;
+                }
+            } else {
+                result.append(current);
             }
         }
-        return value;
+        return null;
     }
 
     private static String escape(String value) {
@@ -675,5 +1067,81 @@ public final class SqlConditionBuilder {
 
     private static int safe(Integer value) {
         return value == null ? 0 : value;
+    }
+
+    private static final class TableInstance {
+        private final String tableName;
+        private final String alias;
+        private final boolean qualified;
+        private String effectiveAlias;
+
+        private TableInstance(String tableName, String alias, boolean qualified) {
+            this.tableName = tableName;
+            this.alias = alias == null || alias.trim().isEmpty() ? tableName : alias;
+            this.effectiveAlias = this.alias;
+            this.qualified = qualified;
+        }
+    }
+
+    private static final class QueryScope {
+        private final List<TableInstance> instances = new ArrayList<TableInstance>();
+        private final Map<String, List<TableInstance>> byTable =
+                new LinkedHashMap<String, List<TableInstance>>();
+        private final Map<String, TableInstance> byAlias =
+                new LinkedHashMap<String, TableInstance>();
+
+        private void add(TableInstance instance) {
+            instances.add(instance);
+            List<TableInstance> tableInstances = byTable.get(instance.tableName);
+            if (tableInstances == null) {
+                tableInstances = new ArrayList<TableInstance>();
+                byTable.put(instance.tableName, tableInstances);
+            }
+            tableInstances.add(instance);
+            byAlias.put(normalize(instance.alias), instance);
+            byAlias.put(normalize(instance.effectiveAlias), instance);
+        }
+    }
+
+    private static final class SubqueryScan {
+        private boolean changed;
+    }
+
+    private static final class SubqueryExpressionVisitor extends ExpressionVisitorAdapter {
+        private final List<DataPermissionRule> rules;
+        private final Map<String, String> annotationAliases;
+        private final DataPermissionSubject subject;
+        private final Object parameter;
+        private final boolean denyWhenEmpty;
+        private final Set<String> cteNames;
+        private final SubqueryScan scan;
+
+        private SubqueryExpressionVisitor(List<DataPermissionRule> rules,
+                                          Map<String, String> annotationAliases,
+                                          DataPermissionSubject subject,
+                                          Object parameter,
+                                          boolean denyWhenEmpty,
+                                          Set<String> cteNames,
+                                          SubqueryScan scan) {
+            this.rules = rules;
+            this.annotationAliases = annotationAliases;
+            this.subject = subject;
+            this.parameter = parameter;
+            this.denyWhenEmpty = denyWhenEmpty;
+            this.cteNames = cteNames;
+            this.scan = scan;
+        }
+
+        private void scan(Expression expression) {
+            if (expression != null) {
+                expression.accept(this);
+            }
+        }
+
+        @Override
+        public void visit(SubSelect subSelect) {
+            scan.changed |= addToSubSelect(subSelect,
+                    rules, annotationAliases, subject, parameter, denyWhenEmpty, cteNames);
+        }
     }
 }

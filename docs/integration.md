@@ -100,9 +100,15 @@ public interface ProjectMapper extends BaseMapper<Project> {
 @DataPermission(appPoint = "project", tableAlias = {"project:p"})
 ```
 
-### 多表查询
+`tableAlias` 只适用于该表在查询中只有一个实例的场景。如果同一张表自连接，引擎会为每个别名实例分别附加条件，规则字段会按实例展开（字段 `dept_id` 会分别生成 `a.dept_id = ...` 和 `b.dept_id = ...`）；此时不要用 `tableAlias` 指定单个别名，否则 `ENFORCE` 模式会拒绝查询。
 
-一条 SQL 中出现的每张受保护表都会各自附加条件，表与表之间是 `AND`。规则只会作用于出现在主查询 `FROM` / `JOIN` 中的物理表；如果受保护表只出现在 `JOIN` 的子查询里，请把该子查询拆成独立的 Mapper 查询，或显式加注解并确认 SQL 形态。
+### 多表与子查询
+
+一条 SQL 中出现的每张受保护表都会各自附加条件，表与表之间是 `AND`。引擎按查询作用域遍历 `FROM` / `JOIN`、`SELECT` 列、`WHERE`、`HAVING`、`GROUP BY`、`ORDER BY`、`LIMIT`/`OFFSET` 以及 CTE 和子查询，分别改写每个作用域里的受保护表；子查询中的表使用自己的别名，不会与外层同名别名串用。
+
+CTE 的名称按 SQL 作用域可见性处理：非递归 CTE 自己的名字在其查询体内不可见，前面的 CTE 对后面的 CTE 可见，主查询可见全部 CTE；带 schema 的物理表即使与 CTE 同名，仍按物理表过滤。外层物理表没有命中规则时，即使内层子查询已经改写，外层仍按默认拒绝处理。
+
+对于暂时无法安全解析的结构，`ENFORCE` 模式会拒绝执行；`LOG_ONLY` 模式记录错误并执行原 SQL。上线前仍建议用 `LOG_ONLY` 扫一遍复杂 SQL。
 
 ## 5. 当前用户适配
 
@@ -198,6 +204,8 @@ SQL 解析失败时：
 2. 用消息/Redis 广播，让每个实例调用 `invalidateAll()`
 
 角色变更（用户换角色）不需要额外处理：key 中包含角色集合，换角色后自然命中不同缓存。
+
+管理 API 的规则变更会立即失效当前实例缓存，并在事务提交或回滚后再次失效；回滚不会把未提交的规则留在缓存里。
 
 ## 10. 与现有 `@DataScope` 的关系
 
