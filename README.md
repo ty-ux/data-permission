@@ -55,7 +55,7 @@
 <dependency>
     <groupId>com.ty</groupId>
     <artifactId>data-permission-starter</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.2.0</version>
 </dependency>
 ```
 
@@ -145,7 +145,57 @@ values ('rr-dept', '2', 'r-dept', '0');
 | GET | `/roles/{roleId}/rules` | 角色已绑定的规则 id |
 | PUT | `/roles/{roleId}/rules` | 覆盖角色规则，body：`{"ruleIds":["r1"]}` |
 
-接口本身不做鉴权，**启用前必须由宿主项目在网关或 Spring Security 中限制访问**。规则变更后管理 API 会失效当前实例的缓存；多实例部署依赖 `cache-ttl-seconds` 自动过期。
+从 **0.2.0** 开始，管理接口支持可选的 `com.ty.dp.starter.admin.DataPermissionAdminAuthorizer` SPI：
+
+```java
+public interface DataPermissionAdminAuthorizer {
+    enum AdminAction { LIST, SAVE, EDIT, REMOVE }
+    boolean isAllowed(AdminAction action);
+}
+```
+
+- 管理 API 仍默认关闭；只有 `data-permission.admin.enabled=true` 时才注册鉴权拦截器。
+- **未注册鉴权 Bean 时保持旧行为：允许访问，并在启动时记录 WARN，提醒宿主自行保护接口。升级不会自动使旧宿主具备鉴权能力。**
+- 注册一个鉴权 Bean 后，GET → `LIST`、POST → `SAVE`、PUT → `EDIT`、DELETE → `REMOVE`；OPTIONS 直接放行，其他 HTTP 方法拒绝。详情和角色规则查询也使用 `LIST`。
+- `isAllowed` 返回 false、抛出异常，或 Bean 解析失败（例如存在多个实现且未指定 `@Primary`）时，均返回 HTTP 403、`application/json;charset=UTF-8` 和 `{"error":"forbidden"}`，并记录日志。建议只注册一个实现。
+- 默认保护 `/data-permission/admin/**`；自定义 `data-permission.admin.path` 后，Controller 与拦截器同时使用该路径前缀。
+- SPI 不接收请求参数，宿主从自己的登录上下文读取用户和权限；库不依赖 RuoYi 的权限服务或权限字符串。Spring MVC 依赖为可选，无 Web/MVC 的宿主仍可启动。
+
+RuoYi 宿主可添加下面的实现（**仅宿主侧代码**，确认类位于宿主的组件扫描范围内）：
+
+```java
+import com.csg.framework.web.service.PermissionService;
+import com.ty.dp.starter.admin.DataPermissionAdminAuthorizer;
+import org.springframework.stereotype.Component;
+import javax.annotation.Resource;
+
+@Component
+public class RuoYiDataPermissionAdminAuthorizer implements DataPermissionAdminAuthorizer {
+    @Resource
+    private PermissionService permissionService; // 宿主的 @Service("ss")
+
+    @Override
+    public boolean isAllowed(AdminAction action) {
+        switch (action) {
+            case LIST:
+                return permissionService.hasPermi("system:dataPermission:list");
+            case SAVE:
+                return permissionService.hasPermi("system:dataPermission:add")
+                        || permissionService.hasPermi("system:dataPermission:edit");
+            case EDIT:
+                return permissionService.hasPermi("system:dataPermission:edit");
+            case REMOVE:
+                return permissionService.hasPermi("system:dataPermission:remove");
+            default:
+                return false;
+        }
+    }
+}
+```
+
+升级时将依赖改为 `com.ty:data-permission-starter:0.2.0`。接口路径、请求与成功响应格式保持不变；POST 仍同时承担新增/更新，因此映射到 `SAVE`，上例允许 add 或 edit 权限，PUT 角色绑定映射到 `EDIT`。宿主仍负责认证、CSRF 和 CORS 配置；Spring Security 等过滤器先于 MVC 执行，SPI 不会绕过宿主已有的安全规则，也不应因接入 SPI 而直接放开匿名访问。未使用 SPI 的宿主必须继续在网关或 Spring Security 中限制访问。
+
+规则变更后管理 API 会失效当前实例的缓存；多实例部署依赖 `cache-ttl-seconds` 自动过期。
 
 前端页面：
 
@@ -158,7 +208,7 @@ values ('rr-dept', '2', 'r-dept', '0');
 mvn -B -ntp verify
 ```
 
-示例模块使用 H2 内存库，39 个测试覆盖简单规则、复杂规则、超级管理员、无规则拒绝、`@DataPermissionIgnore`、PageHelper 分页计数、规则变更后的缓存刷新和 `LOG_ONLY` 模式。
+示例模块使用 H2 内存库，测试覆盖简单规则、复杂规则、超级管理员、无规则拒绝、`@DataPermissionIgnore`、PageHelper 分页计数、规则变更后的缓存刷新和 `LOG_ONLY` 模式。starter 单测及 sample 的 MockMvc 测试还覆盖管理 API 动作映射、无 Bean 兼容、拒绝/异常返回 403、自定义路径和 OPTIONS 放行。
 
 CI/CD：
 
@@ -166,8 +216,8 @@ CI/CD：
 - `release.yml`：推送 `v*` 标签时，把版本改为标签版本、构建、发布到 GitHub Packages，并创建 GitHub Release 附带三个库 jar。
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 ## 兼容性

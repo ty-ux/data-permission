@@ -7,8 +7,14 @@ import com.ty.dp.core.subject.DataPermissionContext;
 import com.ty.dp.core.subject.DataPermissionSubjectProvider;
 import com.ty.dp.mybatis.DataPermissionInterceptor;
 import com.ty.dp.starter.admin.DataPermissionAdminController;
+import com.ty.dp.starter.admin.DataPermissionAdminAuthorizer;
+import com.ty.dp.starter.admin.DataPermissionAdminAuthorizationInterceptor;
 import com.ty.dp.starter.admin.DataPermissionAdminService;
 import org.apache.ibatis.session.SqlSessionFactory;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.InitializingBean;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -21,6 +27,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import javax.sql.DataSource;
 import java.util.List;
@@ -112,6 +120,35 @@ public class DataPermissionAutoConfiguration {
                     return DataPermissionContext.getSubject();
                 }
             };
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "org.springframework.web.servlet.config.annotation.WebMvcConfigurer")
+    @ConditionalOnProperty(prefix = "data-permission.admin", name = "enabled", havingValue = "true")
+    static class AdminWebMvcConfiguration implements WebMvcConfigurer {
+
+        private final ObjectProvider<DataPermissionAdminAuthorizer> authorizers;
+        private final String adminPath;
+
+        AdminWebMvcConfiguration(ObjectProvider<DataPermissionAdminAuthorizer> authorizers,
+                @Value("${data-permission.admin.path:/data-permission/admin}") String adminPath) {
+            this.authorizers = authorizers;
+            this.adminPath = adminPath;
+        }
+
+        @Override
+        public void addInterceptors(InterceptorRegistry registry) {
+            registry.addInterceptor(new DataPermissionAdminAuthorizationInterceptor(authorizers))
+                    .addPathPatterns(adminPath + "/**");
+        }
+
+        @Bean
+        @ConditionalOnMissingBean(DataPermissionAdminAuthorizer.class)
+        public InitializingBean dataPermissionAdminAuthorizationWarning() {
+            return () -> LoggerFactory.getLogger(DataPermissionAutoConfiguration.class).warn(
+                    "Management API is enabled without a DataPermissionAdminAuthorizer; "
+                            + "the host application must protect these endpoints");
         }
     }
 

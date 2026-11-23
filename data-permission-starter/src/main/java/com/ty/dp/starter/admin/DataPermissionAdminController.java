@@ -18,8 +18,8 @@ import java.util.Map;
 
 /**
  * Minimal rule administration API. It is disabled by default. The host
- * application must protect these endpoints with its own authentication and
- * authorization rules when enabling {@code data-permission.admin.enabled=true}.
+ * application must provide a {@link DataPermissionAdminAuthorizer} or protect
+ * these endpoints itself when enabling {@code data-permission.admin.enabled=true}.
  */
 @RestController
 @RequestMapping("${data-permission.admin.path:/data-permission/admin}")
