@@ -49,3 +49,10 @@ export function assignRoleRules(roleId, ruleIds) {
     data: { ruleIds }
   })
 }
+
+export function validateRule(data) {
+  return request({ url: BASE_URL + '/rules/validate', method: 'post', data })
+}
+export function subqueryFields() {
+  return request({ url: BASE_URL + '/subquery-fields', method: 'get' })
+}

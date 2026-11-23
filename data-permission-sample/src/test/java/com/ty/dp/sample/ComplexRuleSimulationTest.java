@@ -159,6 +159,40 @@ class ComplexRuleSimulationTest {
         assertTrue(mapper.selectAll().isEmpty());
     }
 
+    @Test
+    void subqueryBindingAliasCountAndCacheIsolation() {
+        DataPermissionRule rule = complex("subquery",
+                item(1, 1, 0, LogicOperator.AND, "sim_project.id", "IN", RightValueType.SUBQUERY,
+                        "select id from sim_project where dept_id=#{deptId} and (owner_no=#{userNo} or create_by=#{userNo})"));
+        assign(ROLE, rule);
+        setSubject(100L, "u1");
+        List<Long> expected = ids(mapper.selectAliased());
+        assertTrue(!expected.isEmpty());
+        assertEquals(expected, ids(mapper.selectByDeptParam(100L)));
+        assertEquals(expected, ids(mapper.selectIds(Arrays.asList(101L, 102L, 103L, 104L, 105L))));
+        com.github.pagehelper.PageHelper.startPage(1, 1);
+        com.github.pagehelper.PageInfo<SimProject> page = new com.github.pagehelper.PageInfo<SimProject>(mapper.selectAliased());
+        assertEquals(expected.size(), page.getTotal());
+        assertEquals(1, page.getList().size());
+        setSubject(100L, "nobody' OR '1'='1");
+        assertTrue(mapper.selectAliased().isEmpty());
+        setSubject(100L, "u1");
+        rule.getItems().get(0).setRightExpr("select id from sim_project where dept_id=#{deptId} and id=-1");
+        adminService.saveRule(rule);
+        assertTrue(mapper.selectAliased().isEmpty());
+    }
+
+    @Test
+    void subqueryUnionAndCountWrapperBindRepeatedFields() {
+        assign(ROLE, complex("sq-union", item(1, 1, 0, LogicOperator.AND, "id", "IN", RightValueType.SUBQUERY,
+                "select id from sim_project where dept_id=#{deptId} and dept_id=#{deptId}")));
+        setSubject(100L, "u1");
+        List<Long> expected = ids(mapper.selectAll());
+        assertEquals(expected, mapper.selectUnionIds());
+        assertEquals(expected, ids(mapper.selectFromSubquery()));
+        assertEquals(Collections.emptyList(), ids(mapper.selectByDeptParam(200L)));
+    }
+
     private void assign(String roleId, DataPermissionRule... rules) {
         List<String> ids = new ArrayList<String>();
         for (DataPermissionRule rule : rules) {

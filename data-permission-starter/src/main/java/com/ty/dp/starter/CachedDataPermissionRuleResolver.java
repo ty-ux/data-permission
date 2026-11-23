@@ -18,10 +18,13 @@ public class CachedDataPermissionRuleResolver implements DataPermissionRuleResol
 
     private final DataPermissionRuleRepository repository;
     private final TtlCache<List<DataPermissionRule>> cache;
+    // Role lookup locates the content key without another database read on cache hits.
+    private final TtlCache<String> contentKeys;
 
     public CachedDataPermissionRuleResolver(DataPermissionRuleRepository repository, long ttlSeconds) {
         this.repository = repository;
         this.cache = new TtlCache<List<DataPermissionRule>>(ttlSeconds);
+        this.contentKeys = new TtlCache<String>(ttlSeconds);
     }
 
     @Override
@@ -37,19 +40,37 @@ public class CachedDataPermissionRuleResolver implements DataPermissionRuleResol
         Collections.sort(sorted);
         String key = buildKey(sorted, appPoint);
 
-        List<DataPermissionRule> cached = cache.get(key);
+        String contentKey = contentKeys.get(key);
+        List<DataPermissionRule> cached = contentKey == null ? null : cache.get(contentKey);
         if (cached != null) {
             return cached;
         }
         List<DataPermissionRule> loaded = repository.findByRoles(sorted, appPoint);
         List<DataPermissionRule> immutable = Collections.unmodifiableList(
                 loaded == null ? new ArrayList<DataPermissionRule>() : new ArrayList<DataPermissionRule>(loaded));
-        cache.put(key, immutable);
+        contentKey = withSubqueryContent(key, immutable);
+        cache.put(contentKey, immutable);
+        contentKeys.put(key, contentKey);
         return immutable;
     }
 
     public void invalidateAll() {
+        contentKeys.clear();
         cache.clear();
+    }
+
+    static String withSubqueryContent(String key, List<DataPermissionRule> rules) {
+        StringBuilder builder = new StringBuilder(key);
+        for (DataPermissionRule rule : rules) {
+            if (rule.getItems() == null) continue;
+            for (com.ty.dp.core.model.DataPermissionRuleItem item : rule.getItems()) {
+                if (item.getRightType() == com.ty.dp.core.model.RightValueType.SUBQUERY) {
+                    String sql = item.getRightExpr() == null ? "" : item.getRightExpr();
+                    builder.append("|SUBQUERY:").append(sql.length()).append(':').append(sql);
+                }
+            }
+        }
+        return builder.toString();
     }
 
     private static String buildKey(List<String> roleIds, String appPoint) {

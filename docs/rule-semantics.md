@@ -167,3 +167,8 @@ PageHelper 生成 `select count(0) from (原 SQL) table_count` 时，拦截器�
 - 注解的 `appPoint` 为空时，只按表名匹配
 - 规则表名不在当前 SQL 的表集合中时，该规则被忽略；若最终没有任何条件且 `default-policy=DENY`，整条查询仍会被 `1 = 0` 拒绝
 - `@DataPermission` 可以放在接口上作为默认值，方法上的注解覆盖接口注解
+
+
+## 0.3.0 子查询右值
+
+复杂明细支持 `right_type=SUBQUERY`，`operator=IN`，`right_expr` 为只读 SELECT 模板。组间 OR、子组间 AND 及同子组明细逻辑均保持不变。模板内 `#{userId}` 等白名单字段使用 PreparedStatement 参数绑定。保存与执行双重校验，详细限制和页面例子见 [0.3.0 升级说明](upgrade-0.3.0.md)。

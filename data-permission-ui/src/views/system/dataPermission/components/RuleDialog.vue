@@ -10,6 +10,7 @@
     @closed="reset"
   >
     <div v-loading="loading">
+      <p v-if="validationError" ref="validationSummary" role="alert" tabindex="-1">{{ validationError }}</p>
       <el-form ref="ruleForm" :model="form" :rules="rules" label-width="96px" size="small" :disabled="submitting">
         <el-row :gutter="16">
           <el-col :span="12">
@@ -133,7 +134,19 @@
             </el-table-column>
             <el-table-column label="右值" min-width="125">
               <template slot-scope="scope">
-                <el-input v-model="scope.row.rightExpr" size="mini" maxlength="255" placeholder="deptId 或 100" />
+                <template v-if="scope.row.rightType === 'SUBQUERY'">
+                  <label :for="'dp-sql-' + scope.$index">子查询 SQL（必填）</label>
+                  <div :id="'dp-sql-hint-' + scope.$index">仅单条只读 SELECT，最多 4000 字符；操作符须选 IN。</div>
+                  <el-input :id="'dp-sql-' + scope.$index" v-model="scope.row.rightExpr" type="textarea" :rows="5"
+                    maxlength="4000" required :spellcheck="false" autocorrect="off" autocapitalize="none"
+                    :aria-describedby="'dp-sql-hint-' + scope.$index" resize="vertical" />
+                  <el-select size="mini" placeholder="插入用户占位符" :value="null"
+                    :aria-label="'第 ' + (scope.$index + 1) + ' 条明细插入占位符'"
+                    @change="field => insertPlaceholder(scope.row, field)">
+                    <el-option v-for="field in placeholderFields" :key="field" :label="field" :value="field" />
+                  </el-select>
+                </template>
+                <el-input v-else v-model="scope.row.rightExpr" size="mini" maxlength="500" placeholder="deptId 或 100" />
               </template>
             </el-table-column>
             <el-table-column label="操作" width="60" align="center" fixed="right">
@@ -163,7 +176,7 @@
 </template>
 
 <script>
-import { getRule, saveRule } from '@/api/system/dataPermission'
+import { getRule, saveRule, validateRule, subqueryFields } from '@/api/system/dataPermission'
 
 export default {
   name: 'RuleDialog',
@@ -173,6 +186,8 @@ export default {
       loading: false,
       submitting: false,
       session: 0,
+      placeholderFields: [],
+      validationError: '',
       form: this.blankForm(),
       operatorOptions: [
         { label: '=', value: '=' },
@@ -190,6 +205,7 @@ export default {
         { label: '常量/动态', value: 'CONST' },
         { label: '用户字段', value: 'CURRENT_USER_FIELD' },
         { label: '字段', value: 'FIELD' },
+        { label: '子查询 SQL', value: 'SUBQUERY' },
         { label: '无', value: 'NONE' }
       ],
       rules: {
@@ -202,6 +218,7 @@ export default {
   methods: {
     open(ruleId) {
       const token = ++this.session
+      subqueryFields().then(fields => { if (token === this.session) this.placeholderFields = fields }).catch(() => {})
       this.visible = true
       this.form = this.blankForm()
       this.$nextTick(() => {
@@ -294,6 +311,9 @@ export default {
       })
       return form
     },
+    insertPlaceholder(item, field) {
+      item.rightExpr = (item.rightExpr || '') + '#{' + field + '}'
+    },
     addItem() {
       this.form.items.push(this.blankItem(this.form.items.length))
     },
@@ -314,6 +334,7 @@ export default {
     },
     reset() {
       this.form = this.blankForm()
+      this.validationError = ''
       this.loading = false
       this.submitting = false
     },
@@ -322,6 +343,7 @@ export default {
         return
       }
       const token = this.session
+      this.validationError = ''
       this.trimForm()
       this.$refs.ruleForm.validate(valid => {
         if (!valid) {
@@ -374,7 +396,7 @@ export default {
             item.leftType = item.leftType || 'FIELD'
           })
         }
-        saveRule(payload)
+        validateRule(payload).then(() => saveRule(payload))
           .then(() => {
             if (token !== this.session) {
               return
@@ -383,7 +405,11 @@ export default {
             this.visible = false
             this.$emit('saved')
           })
-          .catch(() => {})
+          .catch(error => {
+            if (token !== this.session) return
+            this.validationError = (error.response && error.response.data && error.response.data.error) || error.message || '校验或保存失败，请检查规则后重试'
+            this.$nextTick(() => { if (this.$refs.validationSummary) this.$refs.validationSummary.focus() })
+          })
           .finally(() => {
             if (token === this.session) {
               this.submitting = false

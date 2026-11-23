@@ -32,16 +32,25 @@ import java.util.UUID;
  */
 public class DataPermissionAdminService {
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final java.util.function.Supplier<NamedParameterJdbcTemplate> jdbc;
+
+    private NamedParameterJdbcTemplate jdbc() { return jdbc.get(); }
     private final DataPermissionProperties properties;
     private final DataPermissionRuleResolver ruleResolver;
 
     public DataPermissionAdminService(NamedParameterJdbcTemplate jdbc,
                                       DataPermissionProperties properties,
                                       DataPermissionRuleResolver ruleResolver) {
-        this.jdbc = jdbc;
+        this.jdbc = () -> jdbc;
         this.properties = properties;
         this.ruleResolver = ruleResolver;
+    }
+
+    public DataPermissionAdminService(java.util.function.Supplier<NamedParameterJdbcTemplate> jdbc,
+            DataPermissionProperties properties, DataPermissionRuleResolver resolver) {
+        this.jdbc = jdbc;
+        this.properties = properties;
+        this.ruleResolver = resolver;
     }
 
     public List<DataPermissionRule> listRules(String appPoint, String ruleName) {
@@ -61,7 +70,7 @@ public class DataPermissionAdminService {
         }
         sql.append("order by priority desc, sort_order asc, id asc");
 
-        List<DataPermissionRule> rules = jdbc.query(sql.toString(), params, new RowMapper<DataPermissionRule>() {
+        List<DataPermissionRule> rules = jdbc().query(sql.toString(), params, new RowMapper<DataPermissionRule>() {
             @Override
             public DataPermissionRule mapRow(ResultSet rs, int rowNum) throws SQLException {
                 return mapRule(rs);
@@ -76,7 +85,7 @@ public class DataPermissionAdminService {
         String sql = "select id, rule_name, app_point, table_name, field_name, condition_type, "
                 + "condition_value, rule_mode, logic_operator, sort_order, priority, enabled, description "
                 + "from " + table + " where id = :id and is_del = '0'";
-        List<DataPermissionRule> rules = jdbc.query(sql,
+        List<DataPermissionRule> rules = jdbc().query(sql,
                 new MapSqlParameterSource("id", id), new RowMapper<DataPermissionRule>() {
                     @Override
                     public DataPermissionRule mapRow(ResultSet rs, int rowNum) throws SQLException {
@@ -93,6 +102,16 @@ public class DataPermissionAdminService {
     @Transactional
     public String saveRule(DataPermissionRule rule) {
         validate(rule);
+        return transaction().execute(status -> saveRuleInTransaction(rule));
+    }
+
+    private org.springframework.transaction.support.TransactionTemplate transaction() {
+        return new org.springframework.transaction.support.TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc().getJdbcTemplate().getDataSource()));
+    }
+
+    private String saveRuleInTransaction(DataPermissionRule rule) {
+        validate(rule);
         String ruleTable = SqlIdentifiers.table(properties.getTable().getRule());
         String itemTable = SqlIdentifiers.table(properties.getTable().getRuleItem());
         if (isBlank(rule.getId())) {
@@ -102,7 +121,7 @@ public class DataPermissionAdminService {
             if (updateRule(ruleTable, rule) == 0) {
                 throw new IllegalArgumentException("Rule not found: " + rule.getId());
             }
-            jdbc.update("delete from " + itemTable + " where rule_id = :ruleId",
+            jdbc().update("delete from " + itemTable + " where rule_id = :ruleId",
                     new MapSqlParameterSource("ruleId", rule.getId()));
         }
         insertItems(itemTable, rule);
@@ -112,6 +131,11 @@ public class DataPermissionAdminService {
 
     @Transactional
     public void deleteRules(List<String> ids) {
+        if (ids == null || ids.isEmpty()) return;
+        transaction().execute(status -> { deleteRulesInTransaction(ids); return null; });
+    }
+
+    private void deleteRulesInTransaction(List<String> ids) {
         if (ids == null || ids.isEmpty()) {
             return;
         }
@@ -119,9 +143,9 @@ public class DataPermissionAdminService {
         String itemTable = SqlIdentifiers.table(properties.getTable().getRuleItem());
         String roleRuleTable = SqlIdentifiers.table(properties.getTable().getRoleRule());
         MapSqlParameterSource params = new MapSqlParameterSource("ids", ids);
-        jdbc.update("update " + ruleTable + " set is_del = '1', update_time = now() where id in (:ids)", params);
-        jdbc.update("update " + itemTable + " set is_del = '1' where rule_id in (:ids)", params);
-        jdbc.update("delete from " + roleRuleTable + " where rule_id in (:ids)", params);
+        jdbc().update("update " + ruleTable + " set is_del = '1', update_time = now() where id in (:ids)", params);
+        jdbc().update("update " + itemTable + " set is_del = '1' where rule_id in (:ids)", params);
+        jdbc().update("delete from " + roleRuleTable + " where rule_id in (:ids)", params);
         invalidate();
     }
 
@@ -129,13 +153,17 @@ public class DataPermissionAdminService {
         String roleRuleTable = SqlIdentifiers.table(properties.getTable().getRoleRule());
         String sql = "select rule_id from " + roleRuleTable
                 + " where role_id = :roleId and is_del = '0'";
-        return jdbc.queryForList(sql, new MapSqlParameterSource("roleId", roleId), String.class);
+        return jdbc().queryForList(sql, new MapSqlParameterSource("roleId", roleId), String.class);
     }
 
     @Transactional
     public void assignRoleRules(String roleId, List<String> ruleIds) {
+        transaction().execute(status -> { assignRoleRulesInTransaction(roleId, ruleIds); return null; });
+    }
+
+    private void assignRoleRulesInTransaction(String roleId, List<String> ruleIds) {
         String roleRuleTable = SqlIdentifiers.table(properties.getTable().getRoleRule());
-        jdbc.update("delete from " + roleRuleTable + " where role_id = :roleId",
+        jdbc().update("delete from " + roleRuleTable + " where role_id = :roleId",
                 new MapSqlParameterSource("roleId", roleId));
         if (ruleIds != null) {
             for (String ruleId : ruleIds) {
@@ -146,7 +174,7 @@ public class DataPermissionAdminService {
                         .addValue("id", newId())
                         .addValue("roleId", roleId)
                         .addValue("ruleId", ruleId);
-                jdbc.update("insert into " + roleRuleTable
+                jdbc().update("insert into " + roleRuleTable
                         + " (id, role_id, rule_id, create_time, is_del) values (:id, :roleId, :ruleId, now(), '0')",
                         params);
             }
@@ -160,7 +188,7 @@ public class DataPermissionAdminService {
                 + "rule_mode, logic_operator, sort_order, priority, enabled, description, create_time, is_del) "
                 + "values (:id, :ruleName, :appPoint, :tableName, :fieldName, :conditionType, :conditionValue, "
                 + ":ruleMode, :logicOperator, :sortOrder, :priority, :enabled, :description, now(), '0')";
-        jdbc.update(sql, ruleParams(rule));
+        jdbc().update(sql, ruleParams(rule));
     }
 
     private int updateRule(String table, DataPermissionRule rule) {
@@ -170,7 +198,7 @@ public class DataPermissionAdminService {
                 + "rule_mode = :ruleMode, logic_operator = :logicOperator, sort_order = :sortOrder, "
                 + "priority = :priority, enabled = :enabled, description = :description, update_time = now() "
                 + "where id = :id and is_del = '0'";
-        return jdbc.update(sql, ruleParams(rule));
+        return jdbc().update(sql, ruleParams(rule));
     }
 
     private MapSqlParameterSource ruleParams(DataPermissionRule rule) {
@@ -211,7 +239,7 @@ public class DataPermissionAdminService {
                     .addValue("operator", item.getOperator())
                     .addValue("rightType", item.getRightType() == null ? RightValueType.CONST.name() : item.getRightType().name())
                     .addValue("rightExpr", item.getRightExpr());
-            jdbc.update("insert into " + table
+            jdbc().update("insert into " + table
                     + " (id, rule_id, sort_order, group_no, sub_group_no, logic_operator, left_type, left_expr, "
                     + "operator, right_type, right_expr, create_time, is_del) "
                     + "values (:id, :ruleId, :sortOrder, :groupNo, :subGroupNo, :logicOperator, :leftType, "
@@ -240,7 +268,7 @@ public class DataPermissionAdminService {
                 + "left_expr, operator, right_type, right_expr from " + itemTable
                 + " where is_del = '0' and rule_id in (:ruleIds) "
                 + "order by group_no asc, sub_group_no asc, sort_order asc, id asc";
-        jdbc.query(sql, new MapSqlParameterSource("ruleIds", complexIds), new RowCallbackHandler() {
+        jdbc().query(sql, new MapSqlParameterSource("ruleIds", complexIds), new RowCallbackHandler() {
             @Override
             public void processRow(ResultSet rs) throws SQLException {
                 DataPermissionRule rule = byId.get(rs.getString("rule_id"));
@@ -283,7 +311,7 @@ public class DataPermissionAdminService {
         return rule;
     }
 
-    private void validate(DataPermissionRule rule) {
+    public void validate(DataPermissionRule rule) {
         if (rule == null) {
             throw new IllegalArgumentException("Rule is required");
         }
@@ -326,6 +354,10 @@ public class DataPermissionAdminService {
             if (operator == null) {
                 throw new IllegalArgumentException("Complex item " + index
                         + " has an unsupported operator: " + item.getOperator());
+            }
+            if (item.getRightType() == RightValueType.SUBQUERY) {
+                if (operator != ConditionOperator.IN) throw new IllegalArgumentException("SUBQUERY requires IN");
+                com.ty.dp.core.sql.SubqueryTemplate.validate(item.getRightExpr());
             }
             if (operator == ConditionOperator.IS_NULL || operator == ConditionOperator.IS_NOT_NULL) {
                 continue;

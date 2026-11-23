@@ -55,7 +55,7 @@
 <dependency>
     <groupId>com.ty</groupId>
     <artifactId>data-permission-starter</artifactId>
-    <version>0.2.0</version>
+    <version>0.3.0</version>
 </dependency>
 ```
 
@@ -193,7 +193,7 @@ public class RuoYiDataPermissionAdminAuthorizer implements DataPermissionAdminAu
 }
 ```
 
-升级时将依赖改为 `com.ty:data-permission-starter:0.2.0`。接口路径、请求与成功响应格式保持不变；POST 仍同时承担新增/更新，因此映射到 `SAVE`，上例允许 add 或 edit 权限，PUT 角色绑定映射到 `EDIT`。宿主仍负责认证、CSRF 和 CORS 配置；Spring Security 等过滤器先于 MVC 执行，SPI 不会绕过宿主已有的安全规则，也不应因接入 SPI 而直接放开匿名访问。未使用 SPI 的宿主必须继续在网关或 Spring Security 中限制访问。
+升级时将依赖改为 `com.ty:data-permission-starter:0.3.0`。接口路径、请求与成功响应格式保持不变；POST 仍同时承担新增/更新，因此映射到 `SAVE`，上例允许 add 或 edit 权限，PUT 角色绑定映射到 `EDIT`。宿主仍负责认证、CSRF 和 CORS 配置；Spring Security 等过滤器先于 MVC 执行，SPI 不会绕过宿主已有的安全规则，也不应因接入 SPI 而直接放开匿名访问。未使用 SPI 或配置式鉴权的宿主必须继续在网关或 Spring Security 中限制访问。
 
 规则变更后管理 API 会失效当前实例的缓存；多实例部署依赖 `cache-ttl-seconds` 自动过期。
 
@@ -216,8 +216,8 @@ CI/CD：
 - `release.yml`：推送 `v*` 标签时，把版本改为标签版本、构建、发布到 GitHub Packages，并创建 GitHub Release 附带三个库 jar。
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 ## 兼容性
@@ -250,3 +250,28 @@ git push origin v0.2.0
 ## License
 
 [MIT](LICENSE) © 2026 ty-ux
+
+
+## 0.3.0：配置接入与关系型规则
+
+动态数据源、管理鉴权和关系型可见范围现在均可配置，无需宿主编写配置类。
+见 [0.3.0 升级说明](docs/upgrade-0.3.0.md)，包含最小 YAML、增量迁移、PPM 页面规则示例与兼容边界。
+
+```yaml
+data-permission:
+  enabled: true
+  mode: LOG_ONLY
+  datasource-bean: masterDataSource
+  admin:
+    enabled: true
+    authorization:
+      list: "@ss.hasPermi('system:dataPermission:list')"
+      save: "@ss.hasPermi('system:dataPermission:add') or @ss.hasPermi('system:dataPermission:edit')"
+      edit: "@ss.hasPermi('system:dataPermission:edit')"
+      remove: "@ss.hasPermi('system:dataPermission:remove')"
+```
+
+`datasource-bean` 默认空，沿用容器唯一/主候选 DataSource；指定后规则仓库和管理服务都延迟按名称解析同一个真实 DataSource。原有自定义 SPI Bean 仍优先。
+`admin.authorization` 是可信部署配置，可调用应用 Bean，**不要暴露给普通用户**；有任何表达式配置时，缺少的动作、false 和异常都拒绝（403）。完全不配且没有 Authorizer 时，保留 0.2.0 告警并放行行为。
+
+复杂规则新增 `rightType=SUBQUERY`，操作符必须为 `IN`。SQL 模板保存于 `right_expr`，最长 4000 字符；保存及执行前均通过已 shade 的 JSQLParser 校验，只接受单条只读 SELECT。占位符按当前用户字段白名单解析并通过 PreparedStatement 绑定；详情见升级说明。旧规则与管理接口路径保持兼容。

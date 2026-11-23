@@ -11,7 +11,9 @@ import com.ty.dp.core.sql.SqlMarkers;
 import com.ty.dp.core.subject.DataPermissionContext;
 import com.ty.dp.core.subject.DataPermissionSubject;
 import com.ty.dp.core.subject.DataPermissionSubjectProvider;
-import org.apache.ibatis.builder.StaticSqlSource;
+import com.ty.dp.core.sql.SqlParameterTokens;
+import org.apache.ibatis.mapping.ParameterMapping;
+import java.util.ArrayList;
 import org.apache.ibatis.executor.Executor;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
@@ -126,9 +128,15 @@ public class DataPermissionInterceptor implements Interceptor {
                                      List<DataPermissionRule> rules,
                                      boolean denyWhenEmpty) throws Throwable {
         String rewritten;
+        Map<String, Object> bindings = new LinkedHashMap<String, Object>();
+        final int[] originalIndex = {0};
+        String tokenized = SqlParameterTokens.replace(sql, token -> {
+            if (!"?".equals(token)) throw new DataPermissionException("Reserved SQL parameter name: " + token);
+            return ":__dp_original_" + originalIndex[0]++;
+        });
         try {
-            rewritten = SqlConditionBuilder.apply(sql, rules, meta.aliases, subject,
-                    invocation.getArgs()[1], denyWhenEmpty);
+            rewritten = SqlConditionBuilder.applyPrepared(tokenized, rules, meta.aliases, subject,
+                    invocation.getArgs()[1], denyWhenEmpty, bindings);
         } catch (DataPermissionException ex) {
             if (options.getMode() == DataPermissionMode.LOG_ONLY) {
                 log.error("[data-permission] cannot rewrite SQL, mode=LOG_ONLY, mapper={}", statement.getId(), ex);
@@ -138,7 +146,7 @@ public class DataPermissionInterceptor implements Interceptor {
             throw ex;
         }
 
-        if (rewritten == null || rewritten.equals(sql)) {
+        if (rewritten == null || rewritten.equals(tokenized)) {
             return invocation.proceed();
         }
 
@@ -153,8 +161,29 @@ public class DataPermissionInterceptor implements Interceptor {
                     subject == null ? "none" : subject.getSubjectId(), statement.getId(), rewritten);
         }
 
-        SqlSource sqlSource = new StaticSqlSource(statement.getConfiguration(), rewritten,
-                boundSql.getParameterMappings());
+        final List<ParameterMapping> mappings = new ArrayList<ParameterMapping>();
+        String preparedSql = SqlParameterTokens.replace(rewritten, token -> {
+            if (token.startsWith(":__dp_original_")) {
+                int index = Integer.parseInt(token.substring(15));
+                mappings.add(boundSql.getParameterMappings().get(index));
+            } else if (token.startsWith(":__dp_sq_")) {
+                String name = token.substring(1);
+                if (!bindings.containsKey(name)) throw new DataPermissionException("Unknown permission binding");
+                if (boundSql.hasAdditionalParameter(name)) throw new DataPermissionException("Reserved permission binding");
+                mappings.add(new ParameterMapping.Builder(statement.getConfiguration(), name, Object.class).build());
+            } else throw new DataPermissionException("Untracked SQL parameter");
+            return "?";
+        });
+        SqlSource sqlSource = ignored -> {
+            BoundSql prepared = new BoundSql(statement.getConfiguration(), preparedSql, mappings, boundSql.getParameterObject());
+            // Preserve dynamic SQL/foreach values; the SQL source is scoped to this invocation.
+            @SuppressWarnings("unchecked")
+            Map<String, Object> additional = (Map<String, Object>) statement.getConfiguration()
+                    .newMetaObject(boundSql).getValue("additionalParameters");
+            for (Map.Entry<String, Object> entry : additional.entrySet()) prepared.setAdditionalParameter(entry.getKey(), entry.getValue());
+            for (Map.Entry<String, Object> entry : bindings.entrySet()) prepared.setAdditionalParameter(entry.getKey(), entry.getValue());
+            return prepared;
+        };
         invocation.getArgs()[0] = copyWithSqlSource(statement, sqlSource);
         return invocation.proceed();
     }

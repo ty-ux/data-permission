@@ -61,6 +61,9 @@ public class SpringSecurityDataPermissionSubjectProvider implements DataPermissi
             if (!subjectIdResolved) {
                 Object value = Reflections.invoke(principal, "userId");
                 if (value == null) {
+                    value = Reflections.invoke(getUser(), "userId");
+                }
+                if (value == null) {
                     value = Reflections.invoke(principal, "id");
                 }
                 if (value == null) {

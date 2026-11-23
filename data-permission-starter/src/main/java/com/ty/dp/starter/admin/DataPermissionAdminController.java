@@ -42,6 +42,20 @@ public class DataPermissionAdminController {
         return adminService.getRule(id);
     }
 
+    @GetMapping("/subquery-fields")
+    public java.util.Set<String> subqueryFields() { return com.ty.dp.core.sql.SubqueryTemplate.FIELDS; }
+
+    @PostMapping("/rules/validate")
+    public Map<String, String> validate(@RequestBody DataPermissionRule rule) {
+        adminService.validate(rule);
+        return Collections.singletonMap("status", "ok");
+    }
+
+    @org.springframework.web.bind.annotation.ExceptionHandler({IllegalArgumentException.class,
+            com.ty.dp.core.exception.DataPermissionException.class})
+    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.BAD_REQUEST)
+    public Map<String, String> invalid(RuntimeException ex) { return Collections.singletonMap("error", ex.getMessage()); }
+
     @PostMapping("/rules")
     public Map<String, String> save(@RequestBody DataPermissionRule rule) {
         String id = adminService.saveRule(rule);

@@ -43,6 +43,10 @@ public class DataPermissionProperties {
      */
     private long cacheTtlSeconds = 300;
 
+    private String datasourceBean = "";
+    public String getDatasourceBean() { return datasourceBean; }
+    public void setDatasourceBean(String value) { this.datasourceBean = value; }
+
     private Table table = new Table();
 
     private Admin admin = new Admin();
@@ -143,6 +147,10 @@ public class DataPermissionProperties {
     }
 
     public static class Admin {
+
+        private java.util.Map<String, String> authorization = new java.util.LinkedHashMap<String, String>();
+        public java.util.Map<String, String> getAuthorization() { return authorization; }
+        public void setAuthorization(java.util.Map<String, String> value) { authorization = value; }
 
         private boolean enabled = false;
 

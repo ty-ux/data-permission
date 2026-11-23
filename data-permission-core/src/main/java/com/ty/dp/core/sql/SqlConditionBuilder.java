@@ -81,6 +81,16 @@ public final class SqlConditionBuilder {
             Pattern.compile("^[A-Za-z_][A-Za-z0-9_$]*$");
     private static final Object UNRESOLVED = new Object();
 
+    private static final ThreadLocal<Map<String, Object>> BINDINGS = new ThreadLocal<Map<String, Object>>();
+
+    /** Scoped collector: always cleared, including validation failures. */
+    public static String applyPrepared(String sql, List<DataPermissionRule> rules, Map<String, String> aliases,
+            DataPermissionSubject subject, Object parameter, boolean deny, Map<String, Object> bindings) {
+        BINDINGS.set(bindings);
+        try { return apply(sql, rules, aliases, subject, parameter, deny); }
+        finally { BINDINGS.remove(); }
+    }
+
     private SqlConditionBuilder() {
     }
 
@@ -468,6 +478,15 @@ public final class SqlConditionBuilder {
         }
 
         RightValueType rightType = item.getRightType() == null ? RightValueType.CONST : item.getRightType();
+        if (rightType == RightValueType.SUBQUERY) {
+            if (operator != ConditionOperator.IN) throw new DataPermissionException("SUBQUERY requires IN");
+            Map<String, Object> bindings = BINDINGS.get();
+            if (bindings == null) throw new DataPermissionException("SUBQUERY requires applyPrepared and parameter binding");
+            String query = SubqueryTemplate.compile(item.getRightExpr(), subject, bindings);
+            try {
+                return CCJSqlParserUtil.parseCondExpression(left.toString() + " IN (" + query + ")");
+            } catch (JSQLParserException ex) { throw new DataPermissionException("Invalid SUBQUERY condition", ex); }
+        }
         if (rightType == RightValueType.FIELD) {
             Column right = createColumn(item.getRightExpr(), alias, aliases);
             if (right == null) {

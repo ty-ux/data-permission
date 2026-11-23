@@ -134,6 +134,13 @@ export default function request(config) {
   const params = config.params || {}
   const data = config.data || {}
 
+  // Demo-only fixtures. Production validation always runs in the starter's SQL parser.
+  if (method === 'get' && path === '/data-permission/admin/subquery-fields') {
+    return delay(['userId', 'deptId', 'username', 'userName', 'userNo', 'roleIds', 'visibleTaskIds', 'visibleProjectIds'])
+  }
+  if (method === 'post' && path === '/data-permission/admin/rules/validate') {
+    return delay({ status: 'ok' })
+  }
   if (method === 'get' && path === '/data-permission/admin/rules') {
     const list = rules
       .filter(rule => matchRule(rule, params))

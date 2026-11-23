@@ -31,11 +31,19 @@ public class JdbcDataPermissionRuleRepository implements DataPermissionRuleRepos
 
     private static final Logger log = LoggerFactory.getLogger(JdbcDataPermissionRuleRepository.class);
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final java.util.function.Supplier<NamedParameterJdbcTemplate> jdbc;
+
+    private NamedParameterJdbcTemplate jdbc() { return jdbc.get(); }
     private final DataPermissionProperties properties;
 
     public JdbcDataPermissionRuleRepository(NamedParameterJdbcTemplate jdbc,
                                            DataPermissionProperties properties) {
+        this.jdbc = () -> jdbc;
+        this.properties = properties;
+    }
+
+    public JdbcDataPermissionRuleRepository(java.util.function.Supplier<NamedParameterJdbcTemplate> jdbc,
+            DataPermissionProperties properties) {
         this.jdbc = jdbc;
         this.properties = properties;
     }
@@ -64,7 +72,7 @@ public class JdbcDataPermissionRuleRepository implements DataPermissionRuleRepos
         sql.append("order by r.priority desc, r.sort_order asc, r.id asc");
 
         final Map<String, DataPermissionRule> byId = new LinkedHashMap<String, DataPermissionRule>();
-        jdbc.query(sql.toString(), params, new RowCallbackHandler() {
+        jdbc().query(sql.toString(), params, new RowCallbackHandler() {
             @Override
             public void processRow(ResultSet rs) throws SQLException {
                 DataPermissionRule rule = mapRule(rs);
@@ -97,7 +105,7 @@ public class JdbcDataPermissionRuleRepository implements DataPermissionRuleRepos
                 + "from " + itemTable + " where is_del = '0' and rule_id in (:ruleIds) "
                 + "order by group_no asc, sub_group_no asc, sort_order asc, id asc";
         MapSqlParameterSource params = new MapSqlParameterSource("ruleIds", ruleIds);
-        jdbc.query(sql, params, new RowCallbackHandler() {
+        jdbc().query(sql, params, new RowCallbackHandler() {
             @Override
             public void processRow(ResultSet rs) throws SQLException {
                 String ruleId = rs.getString("rule_id");

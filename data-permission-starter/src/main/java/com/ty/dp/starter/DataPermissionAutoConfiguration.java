@@ -21,12 +21,13 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnSingleCandidate;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.annotation.Conditional;
+import com.ty.dp.starter.admin.ExpressionDataPermissionAdminAuthorizer;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -56,10 +57,10 @@ public class DataPermissionAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(DataPermissionRuleRepository.class)
-    @ConditionalOnSingleCandidate(DataSource.class)
-    public DataPermissionRuleRepository dataPermissionRuleRepository(DataSource dataSource,
+    @Conditional(RuleDataSourceCondition.class)
+    public DataPermissionRuleRepository dataPermissionRuleRepository(ApplicationContext context, ObjectProvider<DataSource> sources,
                                                                      DataPermissionProperties properties) {
-        return new JdbcDataPermissionRuleRepository(new NamedParameterJdbcTemplate(dataSource), properties);
+        return new JdbcDataPermissionRuleRepository(RuleDataSources.lazy(context, sources, properties), properties);
     }
 
     @Bean
@@ -145,6 +146,14 @@ public class DataPermissionAutoConfiguration {
 
         @Bean
         @ConditionalOnMissingBean(DataPermissionAdminAuthorizer.class)
+        @Conditional(AuthorizationExpressionsCondition.class)
+        public DataPermissionAdminAuthorizer expressionDataPermissionAdminAuthorizer(
+                ApplicationContext context, DataPermissionProperties properties) {
+            return new ExpressionDataPermissionAdminAuthorizer(context, properties.getAdmin().getAuthorization());
+        }
+
+        @Bean
+        @ConditionalOnMissingBean(DataPermissionAdminAuthorizer.class)
         public InitializingBean dataPermissionAdminAuthorizationWarning() {
             return () -> LoggerFactory.getLogger(DataPermissionAutoConfiguration.class).warn(
                     "Management API is enabled without a DataPermissionAdminAuthorizer; "
@@ -155,16 +164,16 @@ public class DataPermissionAutoConfiguration {
     @Configuration
     @ConditionalOnClass(name = {"org.springframework.web.bind.annotation.RestController", "javax.servlet.Servlet"})
     @ConditionalOnProperty(prefix = "data-permission.admin", name = "enabled", havingValue = "true")
-    @ConditionalOnSingleCandidate(DataSource.class)
+    @Conditional(RuleDataSourceCondition.class)
     @Import(DataPermissionAdminController.class)
     static class AdminConfiguration {
         @Bean
         @ConditionalOnMissingBean
         public DataPermissionAdminService dataPermissionAdminService(
-                DataSource dataSource,
+                ApplicationContext context, ObjectProvider<DataSource> sources,
                 DataPermissionProperties properties,
                 DataPermissionRuleResolver ruleResolver) {
-            return new DataPermissionAdminService(new NamedParameterJdbcTemplate(dataSource),
+            return new DataPermissionAdminService(RuleDataSources.lazy(context, sources, properties),
                     properties, ruleResolver);
         }
     }

@@ -7,6 +7,7 @@ public enum RightValueType {
     CONST,
     CURRENT_USER_FIELD,
     FIELD,
+    SUBQUERY,
     NONE;
 
     public static RightValueType from(String value) {

@@ -204,3 +204,8 @@ RuoYi 自带的 `@DataScope` 是在 Service 层拼接 `params.dataScope`，依�
 | 复杂规则结果不符 | `group_no` 组间 OR、`sub_group_no` 子组间 AND；明细的 `logic_operator` 从第二条开始生效 |
 | 定时任务被过滤/报错 | 检查 `no-subject-policy`；任务内是否需要 `runAs` / `without` |
 | 解析异常 | 用 `LOG_ONLY` 找到具体 SQL；必要时 `@DataPermissionIgnore` 豁免 |
+
+
+## 0.3.0 配置式接入
+
+多数据源宿主设置 `data-permission.datasource-bean: masterDataSource`，管理鉴权设置 `data-permission.admin.authorization.{list,save,edit,remove}`，无需自定义 Bean。关系型范围通过复杂规则 `SUBQUERY` 表达，详情及完整 RuoYi 配置见 [升级说明](upgrade-0.3.0.md)。

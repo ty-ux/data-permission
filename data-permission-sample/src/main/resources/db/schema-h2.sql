@@ -66,7 +66,7 @@ create table sys_permission_rule_item
     left_expr      varchar(255) not null,
     operator       varchar(20)  not null,
     right_type     varchar(30)  default 'CONST',
-    right_expr     varchar(500),
+    right_expr     varchar(4000) default null,
     create_by      varchar(64),
     create_time    timestamp,
     update_by      varchar(64),

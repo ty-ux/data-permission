@@ -51,6 +51,11 @@ public interface SimProjectMapper {
     List<SimProject> selectByDeptParam(@Param("deptId") Long deptId);
 
     @DataPermission(appPoint = "sim")
+    @Select({"<script>select id, name, dept_id, owner_no, create_by, status, amount from sim_project where id in",
+            "<foreach collection='ids' item='id' open='(' close=')' separator=','>#{id}</foreach> order by id</script>"})
+    List<SimProject> selectIds(@Param("ids") List<Long> ids);
+
+    @DataPermission(appPoint = "sim")
     @Select("select p.id, p.name, p.dept_id, p.owner_no, p.create_by, p.status, p.amount "
             + "from PUBLIC.sim_project p order by p.id")
     List<SimProject> selectSchemaQualified();
