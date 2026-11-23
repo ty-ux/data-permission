@@ -1,0 +1,85 @@
+name: Bug 报告
+description: 报告可复现的功能错误或权限过滤问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请先搜索现有 Issue，确认不是重复问题。
+
+        如果问题涉及**越权访问、权限绕过**等安全风险，请不要公开提交，改用 [私密安全报告](https://github.com/ty-ux/data-permission/security/advisories/new)。
+
+  - type: dropdown
+    id: branch
+    attributes:
+      label: 所在分支
+      options:
+        - main
+        - feature/jdk17
+        - feature/mybatis-plus
+        - feature/jdk17-mybatis-plus
+        - feature/vue3-ui
+        - 不确定
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本或 commit
+      description: release 版本号，或 commit hash
+      placeholder: "0.1.0 / 5990b33"
+    validations:
+      required: true
+
+  - type: input
+    id: jdk
+    attributes:
+      label: JDK 版本
+      placeholder: "17.0.11"
+    validations:
+      required: true
+
+  - type: input
+    id: stack
+    attributes:
+      label: 宿主技术栈
+      description: Spring Boot、MyBatis、MyBatis-Plus、PageHelper 版本，以及是否运行在 RuoYi
+      placeholder: "RuoYi-Vue 3.8.7, Spring Boot 2.7.18, MyBatis 3.5.16, PageHelper 1.4.6"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 最小复现
+      description: 表结构、Mapper 注解、规则配置（sys_permission_rule / sys_permission_rule_item / sys_role_permission_rule）和触发查询
+      render: sql
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 期望行为与实际行为
+      description: 查询应该返回什么，实际返回或抛出了什么
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或改写后的 SQL
+      description: 建议把 data-permission.mode 设为 LOG_ONLY 后贴出实际 SQL；异常请附完整堆栈
+      render: text
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 已搜索现有 Issue，确认不是重复问题
+          required: true
+        - label: 内容不包含真实业务数据、账号、密钥或内网地址
+          required: true
