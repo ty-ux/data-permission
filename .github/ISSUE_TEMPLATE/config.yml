@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞（私密报告）
+    url: https://github.com/ty-ux/data-permission/security/advisories/new
+    about: 请不要公开提交安全漏洞，通过 GitHub Security Advisory 私密报告。
+  - name: 接入指南
+    url: https://github.com/ty-ux/data-permission/blob/main/docs/integration.md
+    about: RuoYi、Spring Security、定时任务与灰度上线。
+  - name: 规则语义与 SQL 改写
+    url: https://github.com/ty-ux/data-permission/blob/main/docs/rule-semantics.md
+    about: 规则如何组合，以及 SQL 如何被改写。

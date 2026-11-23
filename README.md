@@ -3,6 +3,7 @@
 可配置的行级数据权限引擎，面向 RuoYi / Spring Boot 2.x + MyBatis 项目。规则以「角色 → 规则 → 表/字段」的方式存在数据库里，运行时由 MyBatis 拦截器把权限条件写入 SQL，业务查询不需要改。
 
 [![CI](https://github.com/ty-ux/data-permission/actions/workflows/ci.yml/badge.svg)](https://github.com/ty-ux/data-permission/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 > 当前分支：`main`（Java 8 + 原生 MyBatis）。其他兼容性分支见[分支与产物](#分支与产物)。
 
@@ -186,6 +187,16 @@ git push origin v0.1.0
 - [管理页面接入（Vue 2 + Element UI）](data-permission-ui/README.md)
 - [管理页面接入（Vue 3 + Element Plus，`feature/vue3-ui` 分支）](https://github.com/ty-ux/data-permission/tree/feature/vue3-ui/data-permission-ui-vue3)
 
+## 参与贡献
+
+欢迎提交 Issue 和 PR。提交前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)：
+
+- Bug、功能建议和使用问题请使用对应的 [Issue 模板](https://github.com/ty-ux/data-permission/issues/new/choose)，一个 Issue 只讨论一个问题，并提供可复现信息。
+- PR 请按宿主环境选择目标分支，保持单一目的；合并前需通过 `mvn -B -ntp verify`。
+- 安全漏洞请勿公开提交，按 [SECURITY.md](SECURITY.md) 私密报告。
+
+贡献代码默认按 MIT 许可证授权。
+
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) © 2026 ty-ux

@@ -1,0 +1,67 @@
+name: 功能建议
+description: 提出新能力、兼容性或接入体验方面的建议
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先描述使用场景和要解决的问题，再给方案。影响 SQL 改写、默认策略或公共 API 的建议，需要先在 Issue 中达成一致。
+
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 你在什么业务场景下遇到了什么问题？现在的做法为什么不够用？
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的方案
+      description: 希望引擎提供什么能力？与现有规则语义是什么关系？
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 考虑过的替代方案
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 影响范围
+      multiple: true
+      options:
+        - 规则语义 / SQL 改写
+        - MyBatis 拦截器
+        - Spring Boot 自动装配
+        - 管理 API
+        - 前端管理页面
+        - 文档
+        - 构建与发布
+    validations:
+      required: true
+
+  - type: dropdown
+    id: pr
+    attributes:
+      label: 是否愿意提交 PR
+      options:
+        - 愿意提交
+        - 可以协助测试
+        - 暂时不能
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 已搜索现有 Issue，确认不是重复建议
+          required: true
