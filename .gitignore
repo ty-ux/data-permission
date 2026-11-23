@@ -19,3 +19,6 @@ out/
 Thumbs.db
 
 dependency-reduced-pom.xml
+
+# 工具本地状态
+.omc/
