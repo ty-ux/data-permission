@@ -5,11 +5,11 @@
       type="info"
       :closable="false"
       show-icon
-      title="规则保存后当前实例立即生效；多实例部署请等待 cache-ttl-seconds 缓存过期，或自行广播缓存失效。"
+      title="先配置可见范围，再分配给角色。保存后当前服务立即生效，其他服务可能稍有延迟。"
     />
 
     <el-form ref="queryForm" :model="queryParams" size="small" :inline="true" label-width="80px" class="dp-query">
-      <el-form-item label="应用点" prop="appPoint">
+      <el-form-item label="应用位置" prop="appPoint">
         <el-input
           v-model="queryParams.appPoint"
           placeholder="如：project"
@@ -47,18 +47,18 @@
 
     <el-table v-loading="loading" :data="pagedRules" border empty-text="暂无规则">
       <el-table-column label="规则名称" prop="ruleName" min-width="150" :show-overflow-tooltip="true" />
-      <el-table-column label="应用点" prop="appPoint" width="110" align="center">
+      <el-table-column label="应用位置" prop="appPoint" width="110" align="center">
         <template slot-scope="scope">{{ scope.row.appPoint || '全部' }}</template>
       </el-table-column>
       <el-table-column label="目标表" prop="tableName" min-width="130" :show-overflow-tooltip="true" />
-      <el-table-column label="类型" width="90" align="center">
+      <el-table-column label="条件类型" width="100" align="center">
         <template slot-scope="scope">
           <el-tag size="small" :type="scope.row.ruleMode === 'COMPLEX' ? 'warning' : 'success'">
-            {{ scope.row.ruleMode === 'COMPLEX' ? '复杂' : '简单' }}
+            {{ scope.row.ruleMode === 'COMPLEX' ? '多个条件' : '单个条件' }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="条件" min-width="260" :show-overflow-tooltip="true">
+      <el-table-column label="允许查看的范围" min-width="320" class-name="dp-readable-condition">
         <template slot-scope="scope">{{ describeRule(scope.row) }}</template>
       </el-table-column>
       <el-table-column label="优先级" prop="priority" width="80" align="center" />
@@ -70,7 +70,7 @@
         </template>
         <template slot-scope="scope">
           <el-tag size="small" :type="scope.row.logicOperator === 'OR' ? 'warning' : 'info'">
-            {{ scope.row.logicOperator === 'OR' ? 'OR' : 'AND' }}
+            {{ scope.row.logicOperator === 'OR' ? '或' : '且' }}
           </el-tag>
         </template>
       </el-table-column>
@@ -113,18 +113,7 @@ import { listRules, deleteRules } from '@/api/system/dataPermission'
 import RuleDialog from './components/RuleDialog.vue'
 import RoleRulesDialog from './components/RoleRulesDialog.vue'
 
-const OPERATOR_LABELS = {
-  '=': '=',
-  '!=': '!=',
-  '>': '>',
-  '>=': '>=',
-  '<': '<',
-  '<=': '<=',
-  LIKE: 'LIKE',
-  IN: 'IN',
-  IS_NULL: '为空',
-  IS_NOT_NULL: '不为空'
-}
+import { describeRule } from './rulePresentation'
 
 export default {
   name: 'DataPermission',
@@ -212,25 +201,20 @@ export default {
     handleCurrentChange(page) {
       this.pageNum = page
     },
-    describeRule(row) {
-      if (row.ruleMode === 'COMPLEX') {
-        const count = (row.items || []).length
-        return count ? count + ' 条明细（组间 OR / 子组间 AND）' : '未配置明细'
-      }
-      const operator = OPERATOR_LABELS[row.conditionType] || row.conditionType || '?'
-      if (row.conditionType === 'IS_NULL' || row.conditionType === 'IS_NOT_NULL') {
-        return (row.fieldName || '?') + ' ' + operator
-      }
-      const value = row.conditionValue === null || row.conditionValue === undefined || row.conditionValue === ''
-        ? '?'
-        : row.conditionValue
-      return (row.fieldName || '?') + ' ' + operator + ' ' + value
-    }
+    describeRule
   }
 }
 </script>
 
 <style scoped>
+.app-container ::v-deep .dp-readable-condition .cell {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
 .dp-alert {
   margin-bottom: 16px;
 }

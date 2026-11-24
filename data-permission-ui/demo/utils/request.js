@@ -1,3 +1,5 @@
+import { taskScopes } from '../../src/views/system/dataPermission/rulePresentation'
+
 const clone = value => JSON.parse(JSON.stringify(value))
 const delay = value => new Promise(resolve => setTimeout(() => resolve(clone(value)), 120))
 
@@ -107,6 +109,16 @@ let rules = [
     items: []
   }
 ]
+
+// Reproduce the documented PPM scenario without connecting to production data.
+rules.push({
+  id: 'r5', ruleName: '项目进度-我的工单', appPoint: 'ppm_task', tableName: 'ppm_task',
+  ruleMode: 'COMPLEX', logicOperator: 'OR', sortOrder: 10, priority: 100, enabled: true,
+  description: '执行人 / 配合人 / 负责或创建项目',
+  items: taskScopes.map(({ label, ...scope }, index) => ({
+    ...scope, groupNo: index + 1, subGroupNo: 1, sortOrder: index, logicOperator: 'AND', leftType: 'FIELD'
+  }))
+})
 
 let roleRules = {
   2: ['r1'],
