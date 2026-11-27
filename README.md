@@ -55,7 +55,7 @@
 <dependency>
     <groupId>com.ty</groupId>
     <artifactId>data-permission-starter</artifactId>
-    <version>0.3.0</version>
+    <version>0.3.1</version>
 </dependency>
 ```
 
@@ -194,7 +194,7 @@ public class RuoYiDataPermissionAdminAuthorizer implements DataPermissionAdminAu
 }
 ```
 
-升级时将依赖改为 `com.ty:data-permission-starter:0.3.0`。接口路径、请求与成功响应格式保持不变；POST 仍同时承担新增/更新，因此映射到 `SAVE`，上例允许 add 或 edit 权限，PUT 角色绑定映射到 `EDIT`。宿主仍负责认证、CSRF 和 CORS 配置；Spring Security 等过滤器先于 MVC 执行，SPI 不会绕过宿主已有的安全规则，也不应因接入 SPI 而直接放开匿名访问。未使用 SPI 或配置式鉴权的宿主必须继续在网关或 Spring Security 中限制访问。
+升级时将依赖改为 `com.ty:data-permission-starter:0.3.1`。接口路径、请求与成功响应格式保持不变；POST 仍同时承担新增/更新，因此映射到 `SAVE`，上例允许 add 或 edit 权限，PUT 角色绑定映射到 `EDIT`。宿主仍负责认证、CSRF 和 CORS 配置；Spring Security 等过滤器先于 MVC 执行，SPI 不会绕过宿主已有的安全规则，也不应因接入 SPI 而直接放开匿名访问。未使用 SPI 或配置式鉴权的宿主必须继续在网关或 Spring Security 中限制访问。
 
 规则变更后管理 API 会失效当前实例的缓存；多实例部署依赖 `cache-ttl-seconds` 自动过期。
 
