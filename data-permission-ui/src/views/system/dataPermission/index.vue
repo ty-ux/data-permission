@@ -59,7 +59,7 @@
             size="mini"
             type="text"
             :aria-label="'查看角色：' + (scope.row.ruleName || scope.row.id)"
-            @click="$refs.ruleRolesDialog.open(scope.row)"
+            @click="$refs.ruleRolesDialog.open(scope.row, $event.currentTarget)"
           >查看角色</el-button>
         </template>
       </el-table-column>

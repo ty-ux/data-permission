@@ -1,26 +1,52 @@
 <template>
-  <dialog ref="dialog" class="dp-rule-roles" aria-labelledby="dp-rule-roles-title">
-    <h1 id="dp-rule-roles-title">已分配角色</h1>
+  <el-dialog
+    ref="dialog"
+    title="已分配角色"
+    :visible.sync="visible"
+    width="min(600px, calc(100% - 32px))"
+    top="10vh"
+    append-to-body
+    :close-on-click-modal="false"
+    @open="focusDialog"
+    @closed="restoreFocus"
+    @keydown.tab.native="keepFocusInDialog"
+  >
     <p v-if="rule" class="dp-rule-roles-rule">
+      <span>规则</span>
       <strong>{{ rule.ruleName || rule.id }}</strong>
       <el-tag v-if="!rule.enabled" type="info" size="mini">规则已停用</el-tag>
     </p>
-    <p v-if="loading" role="status">正在查询已绑定的角色…</p>
-    <div v-else-if="failed">
+    <div v-if="failed">
       <p role="alert">角色绑定加载失败，请重试。</p>
       <el-button size="small" @click="load">重新加载</el-button>
     </div>
-    <ul v-else-if="roles.length" class="dp-rule-roles-list">
-      <li v-for="role in roles" :key="role.id">
-        <span>{{ role.name || '角色名称不可用' }}</span>
-        <code>ID {{ role.id }}</code>
-      </li>
-    </ul>
-    <p v-else>这条规则还未分配给任何角色。</p>
-    <form method="dialog" class="dp-rule-roles-footer">
-      <button class="el-button el-button--default el-button--small" autofocus>关闭</button>
-    </form>
-  </dialog>
+    <div
+      v-else
+      v-loading="loading"
+      class="dp-rule-roles-table"
+      role="region"
+      aria-label="已分配角色列表"
+      :aria-busy="loading"
+      tabindex="0"
+    >
+      <el-table
+        :data="roles"
+        :empty-text="loading ? '正在查询已绑定的角色…' : '这条规则还未分配给任何角色。'"
+        row-key="id"
+        size="small"
+        border
+        stripe
+      >
+        <el-table-column label="角色名称" prop="name">
+          <template slot-scope="{ row }">{{ row.name || '角色名称不可用' }}</template>
+        </el-table-column>
+        <el-table-column label="角色 ID" prop="id" width="128" />
+      </el-table>
+    </div>
+    <span slot="footer">
+      <el-button ref="closeButton" size="small" @click="visible = false">关闭</el-button>
+    </span>
+  </el-dialog>
 </template>
 
 <script>
@@ -29,16 +55,37 @@ import { listRuleRoles } from '@/api/system/dataPermission'
 export default {
   name: 'RuleRolesDialog',
   data() {
-    return { rule: null, roles: [], loading: false, failed: false, requestSeq: 0 }
+    return { visible: false, trigger: null, rule: null, roles: [], loading: false, failed: false, requestSeq: 0 }
   },
   beforeDestroy() {
     this.requestSeq++
   },
   methods: {
-    open(rule) {
+    open(rule, trigger) {
       this.rule = rule
-      this.$refs.dialog.showModal()
+      this.trigger = trigger
+      this.visible = true
       this.load()
+    },
+    focusDialog() {
+      this.$nextTick(() => {
+        if (this.visible) this.$refs.closeButton.$el.focus()
+      })
+    },
+    restoreFocus() {
+      if (this.visible) return
+      if (this.trigger && this.trigger.isConnected) this.trigger.focus()
+      this.trigger = null
+    },
+    keepFocusInDialog(event) {
+      const controls = this.$refs.dialog.$el.querySelectorAll('button:not([disabled]), .dp-rule-roles-table')
+      const first = controls[0]
+      const last = controls[controls.length - 1]
+      if (event.shiftKey ? event.target === first : event.target === last) {
+        const next = event.shiftKey ? last : first
+        event.preventDefault()
+        next.focus()
+      }
     },
     async load() {
       const seq = ++this.requestSeq
@@ -59,55 +106,27 @@ export default {
 </script>
 
 <style scoped>
-.dp-rule-roles {
-  box-sizing: border-box;
-  width: min(440px, calc(100% - 32px));
-  max-height: calc(100% - 32px);
-  padding: 20px;
-  border: 1px solid #dcdfe6;
-  border-radius: 8px;
-  color: #303133;
+.dp-rule-roles-rule {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+  align-items: center;
+  gap: 8px 12px;
   overflow-wrap: anywhere;
 }
 
-.dp-rule-roles:modal {
-  overscroll-behavior: contain;
+.dp-rule-roles-table {
+  max-height: min(340px, 45vh);
+  overflow: auto;
 }
 
-.dp-rule-roles::backdrop {
-  background: rgb(0 0 0 / 45%);
-  overflow: hidden;
-  overscroll-behavior: contain;
+.dp-rule-roles-table ::v-deep .el-table {
+  overflow: visible;
 }
 
-.dp-rule-roles h1 {
-  margin: 0;
-  font-size: 18px;
-}
-
-.dp-rule-roles-rule, .dp-rule-roles-list li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-}
-
-.dp-rule-roles-list {
-  margin: 16px 0;
-  padding-left: 20px;
-}
-
-.dp-rule-roles-list li {
-  padding: 8px 0;
-  border-bottom: 1px solid #ebeef5;
-}
-
-.dp-rule-roles-list code {
-  color: #606266;
-}
-
-.dp-rule-roles-footer {
-  margin-top: 16px;
-  text-align: right;
+.dp-rule-roles-table ::v-deep .el-table__header-wrapper {
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 </style>
