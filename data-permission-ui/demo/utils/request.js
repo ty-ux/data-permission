@@ -121,9 +121,20 @@ rules.push({
 })
 
 let roleRules = {
-  2: ['r1'],
-  3: ['r2']
+  2: ['r1', 'r4'],
+  3: ['r1', 'r2', 'r5']
 }
+
+const directoryRoles = [
+  { roleId: 2, roleName: '部门成员' },
+  { roleId: 3, roleName: '项目负责人' },
+  { roleId: 4, roleName: '待分配角色' }
+]
+const directoryUsers = [
+  { userId: 101, userName: 'zhangsan', nickName: '张三', roleIds: [2, 3] },
+  { userId: 102, userName: 'lisi', nickName: '李四', roleIds: [2] },
+  { userId: 103, userName: 'wangwu', nickName: '王五', roleIds: [] }
+]
 
 let sequence = 10
 
@@ -145,6 +156,21 @@ export default function request(config) {
   const path = url.split('?')[0]
   const params = config.params || {}
   const data = config.data || {}
+
+  if (method === 'get' && (path === '/system/user/list' || path === '/system/role/list')) {
+    const isUser = path === '/system/user/list'
+    const field = isUser ? 'userName' : 'roleName'
+    const keyword = String(params[field] || '').toLowerCase()
+    const matches = (isUser ? directoryUsers : directoryRoles)
+      .filter(row => row[field].toLowerCase().includes(keyword))
+    return delay({ rows: matches.slice(0, params.pageSize), total: matches.length })
+  }
+  const userPath = path.match(/^\/system\/user\/(\d+)$/)
+  if (method === 'get' && userPath) {
+    const user = directoryUsers.find(row => String(row.userId) === userPath[1])
+    if (!user) return Promise.reject(new Error('人员不存在'))
+    return delay({ data: user, roleIds: user.roleIds, roles: directoryRoles })
+  }
 
   // Demo-only fixtures. Production validation always runs in the starter's SQL parser.
   if (method === 'get' && path === '/data-permission/admin/subquery-fields') {

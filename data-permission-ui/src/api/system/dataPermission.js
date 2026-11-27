@@ -37,7 +37,7 @@ export function deleteRules(ids) {
 // 角色规则分配
 export function listRoleRuleIds(roleId) {
   return request({
-    url: BASE_URL + '/roles/' + roleId + '/rules',
+    url: BASE_URL + '/roles/' + encodeURIComponent(roleId) + '/rules',
     method: 'get'
   })
 }
@@ -55,4 +55,49 @@ export function validateRule(data) {
 }
 export function subqueryFields() {
   return request({ url: BASE_URL + '/subquery-fields', method: 'get' })
+}
+
+// 人员与角色目录由宿主应用提供。默认适配 RuoYi-Vue 的只读接口。
+export function searchTopologySubjects(type, keyword) {
+  const isUser = type === 'user'
+  const field = isUser ? 'userName' : 'roleName'
+  return request({
+    url: isUser ? '/system/user/list' : '/system/role/list',
+    method: 'get',
+    params: { [field]: keyword, pageNum: 1, pageSize: 20 }
+  }).then(({ rows, total }) => ({
+    total,
+    options: rows.map(row => isUser
+      ? {
+        id: String(row.userId),
+        name: row.nickName || row.userName,
+        detail: row.userName,
+        label: row.nickName ? row.nickName + '（' + row.userName + '）' : row.userName
+      }
+      : {
+        id: String(row.roleId),
+        name: row.roleName,
+        detail: 'ID ' + row.roleId,
+        label: row.roleName + '（ID ' + row.roleId + '）'
+      })
+  }))
+}
+
+export function listTopologyUserRoles(userId) {
+  return request({
+    url: '/system/user/' + encodeURIComponent(userId),
+    method: 'get'
+  }).then(({ roleIds, roles = [], data }) => {
+    const assigned = data && data.roles
+    const hasAssignedRoles = Array.isArray(assigned)
+    if (!Array.isArray(roleIds) && !hasAssignedRoles) throw new Error('响应缺少人员角色')
+    const names = new Map([...roles, ...(hasAssignedRoles ? assigned : [])]
+      .map(role => [String(role.roleId), role.roleName]))
+    const ids = Array.isArray(roleIds) ? roleIds : assigned.map(role => role.roleId)
+    return [...new Set(ids.map(String))].map(id => ({
+      id,
+      name: names.get(id) || '角色 ' + id,
+      detail: 'ID ' + id
+    }))
+  })
 }

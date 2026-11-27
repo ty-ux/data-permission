@@ -1,5 +1,6 @@
 <template>
-  <div class="app-container">
+  <permission-topology v-if="showTopology" class="app-container" @back="closeTopology" />
+  <div v-else class="app-container">
     <el-alert
       class="dp-alert"
       type="info"
@@ -39,6 +40,11 @@
       </el-col>
       <el-col :span="1.5">
         <el-button type="warning" plain icon="el-icon-user" size="mini" @click="handleRoleRules">角色分配</el-button>
+      </el-col>
+      <el-col :span="1.5">
+        <el-button ref="topologyButton" type="primary" plain icon="el-icon-share" size="mini" @click="showTopology = true">
+          权限拓扑
+        </el-button>
       </el-col>
       <el-col :span="1.5">
         <el-button icon="el-icon-refresh" size="mini" @click="getList">刷新</el-button>
@@ -112,15 +118,17 @@
 import { listRules, deleteRules } from '@/api/system/dataPermission'
 import RuleDialog from './components/RuleDialog.vue'
 import RoleRulesDialog from './components/RoleRulesDialog.vue'
+import PermissionTopology from './components/PermissionTopology.vue'
 
 import { describeRule } from './rulePresentation'
 
 export default {
   name: 'DataPermission',
-  components: { RuleDialog, RoleRulesDialog },
+  components: { RuleDialog, RoleRulesDialog, PermissionTopology },
   data() {
     return {
       loading: false,
+      showTopology: false,
       ruleList: [],
       queryParams: {
         appPoint: '',
@@ -193,6 +201,10 @@ export default {
     },
     handleRoleRules() {
       this.$refs.roleRulesDialog.open()
+    },
+    closeTopology() {
+      this.showTopology = false
+      this.$nextTick(() => this.$refs.topologyButton.$el.focus())
     },
     handleSizeChange(size) {
       this.pageSize = size

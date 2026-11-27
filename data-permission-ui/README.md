@@ -10,6 +10,8 @@ src/views/system/dataPermission/index.vue     # 规则列表
 src/views/system/dataPermission/components/
   RuleDialog.vue                              # 新增/编辑规则
   RoleRulesDialog.vue                         # 角色规则分配
+  PermissionTopology.vue                      # 查询人员或角色的权限拓扑
+  PermissionTopologyGraph.vue                 # 展示关系与规则来源
 demo/                                         # 本地运行用的 Mock 环境和入口
 ```
 
@@ -54,6 +56,8 @@ demo/                                         # 本地运行用的 Mock 环境�
 
 4. 角色 ID 使用 `sys_role.role_id`，角色分配弹窗里手动输入即可。
 
+5. 「权限拓扑」从宿主应用读取人员和角色。默认使用 RuoYi-Vue 的 `GET /system/user/list`、`GET /system/user/{userId}` 和 `GET /system/role/list`，对应 `system:user:list`、`system:user:query` 和 `system:role:list`。人员按登录账号搜索，结果同时显示姓名和账号。接入其他宿主时，在 `src/api/system/dataPermission.js` 中适配 `searchTopologySubjects` 和 `listTopologyUserRoles`。
+
 ## 页面能力
 
 - 按应用点、规则名称筛选规则
@@ -66,6 +70,7 @@ demo/                                         # 本地运行用的 Mock 环境�
 - 启用/停用规则
 - 删除规则
 - 给角色绑定规则（覆盖式保存）
+- 从规则列表进入「权限拓扑」，按人员或角色查看角色来源、启停状态、可见范围和目标表。点击目标表可按应用点查看启用规则的组合顺序，适用于全部应用点的规则会一并显示。
 
 ## 本地演示
 
@@ -79,7 +84,7 @@ npm run dev
 
 ```bash
 npm run build
-node --test src/views/system/dataPermission/rulePresentation.test.js
+node --test src/views/system/dataPermission/rulePresentation.test.js src/views/system/dataPermission/permissionTopology.test.js
 ```
 
 构建产物在 `dist/`，仅用于验证编译，不需要部署。
