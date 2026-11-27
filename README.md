@@ -140,6 +140,7 @@ values ('rr-dept', '2', 'r-dept', '0');
 | --- | --- | --- |
 | GET | `/rules?appPoint=&ruleName=` | 规则列表 |
 | GET | `/rules/{id}` | 规则详情（含复杂明细） |
+| GET | `/rules/{id}/roles` | 已绑定这条规则的角色 ID 数组，停用规则也可查询 |
 | POST | `/rules` | 新增/更新规则，返回 `{id}` |
 | DELETE | `/rules/{ids}` | 逻辑删除，多个 id 用逗号分隔 |
 | GET | `/roles/{roleId}/rules` | 角色已绑定的规则 id |

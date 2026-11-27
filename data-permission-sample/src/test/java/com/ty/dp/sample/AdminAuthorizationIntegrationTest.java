@@ -25,10 +25,11 @@ class AdminAuthorizationIntegrationTest {
     private DataPermissionAdminAuthorizer authorizer;
 
     @Test
-    void allSixAdminEndpointsAreProtectedAtCustomPath() throws Exception {
+    void adminEndpointsAreProtectedAtCustomPath() throws Exception {
         MockHttpServletRequestBuilder[] requests = {
                 get("/custom/admin/rules"),
                 get("/custom/admin/rules/missing"),
+                get("/custom/admin/rules/r1/roles"),
                 post("/custom/admin/rules").contentType("application/json").content("{}"),
                 delete("/custom/admin/rules/missing"),
                 get("/custom/admin/roles/10/rules"),
@@ -39,7 +40,7 @@ class AdminAuthorizationIntegrationTest {
                     .andExpect(content().contentType("application/json;charset=UTF-8"))
                     .andExpect(content().json("{\"error\":\"forbidden\"}"));
         }
-        verify(authorizer, times(3)).isAllowed(AdminAction.LIST);
+        verify(authorizer, times(4)).isAllowed(AdminAction.LIST);
         verify(authorizer).isAllowed(AdminAction.SAVE);
         verify(authorizer).isAllowed(AdminAction.REMOVE);
         verify(authorizer).isAllowed(AdminAction.EDIT);
@@ -50,6 +51,15 @@ class AdminAuthorizationIntegrationTest {
         when(authorizer.isAllowed(AdminAction.LIST)).thenReturn(true);
         mvc.perform(get("/custom/admin/rules")).andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
+    }
+
+    @Test
+    void allowedRuleRoleLookupReturnsRoleIds() throws Exception {
+        when(authorizer.isAllowed(AdminAction.LIST)).thenReturn(true);
+        mvc.perform(get("/custom/admin/rules/r1/roles")).andExpect(status().isOk())
+                .andExpect(content().json("[\"10\"]"));
+        mvc.perform(get("/custom/admin/rules/missing/roles")).andExpect(status().isOk())
+                .andExpect(content().json("[]"));
     }
 
     @Test

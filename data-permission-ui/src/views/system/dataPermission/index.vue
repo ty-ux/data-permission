@@ -53,6 +53,16 @@
 
     <el-table v-loading="loading" :data="pagedRules" border empty-text="暂无规则">
       <el-table-column label="规则名称" prop="ruleName" min-width="150" :show-overflow-tooltip="true" />
+      <el-table-column label="已分配角色" width="112" align="center">
+        <template slot-scope="scope">
+          <el-button
+            size="mini"
+            type="text"
+            :aria-label="'查看角色：' + (scope.row.ruleName || scope.row.id)"
+            @click="$refs.ruleRolesDialog.open(scope.row)"
+          >查看角色</el-button>
+        </template>
+      </el-table-column>
       <el-table-column label="应用位置" prop="appPoint" width="110" align="center">
         <template slot-scope="scope">{{ scope.row.appPoint || '全部' }}</template>
       </el-table-column>
@@ -111,6 +121,7 @@
 
     <rule-dialog ref="ruleDialog" @saved="getList" />
     <role-rules-dialog ref="roleRulesDialog" />
+    <rule-roles-dialog ref="ruleRolesDialog" />
   </div>
 </template>
 
@@ -118,13 +129,14 @@
 import { listRules, deleteRules } from '@/api/system/dataPermission'
 import RuleDialog from './components/RuleDialog.vue'
 import RoleRulesDialog from './components/RoleRulesDialog.vue'
+import RuleRolesDialog from './components/RuleRolesDialog.vue'
 import PermissionTopology from './components/PermissionTopology.vue'
 
 import { describeRule } from './rulePresentation'
 
 export default {
   name: 'DataPermission',
-  components: { RuleDialog, RoleRulesDialog, PermissionTopology },
+  components: { RuleDialog, RoleRulesDialog, RuleRolesDialog, PermissionTopology },
   data() {
     return {
       loading: false,

@@ -138,12 +138,21 @@ class AdminCrudSimulationTest {
         adminService.assignRoleRules("sim-role-bind", Arrays.asList(first, second));
         assertEquals(new HashSet<String>(Arrays.asList(first, second)),
                 new HashSet<String>(adminService.listRoleRuleIds("sim-role-bind")));
+        adminService.assignRoleRules("another-role", Collections.singletonList(second));
+        assertEquals(Arrays.asList("another-role", "sim-role-bind"), adminService.listRuleRoleIds(second));
 
         adminService.assignRoleRules("sim-role-bind", Collections.singletonList(second));
         assertEquals(Collections.singletonList(second), adminService.listRoleRuleIds("sim-role-bind"));
+        assertTrue(adminService.listRuleRoleIds(first).isEmpty());
+
+        DataPermissionRule disabled = adminService.getRule(second);
+        disabled.setEnabled(false);
+        adminService.saveRule(disabled);
+        assertEquals(Arrays.asList("another-role", "sim-role-bind"), adminService.listRuleRoleIds(second));
 
         adminService.deleteRules(Collections.singletonList(second));
         assertTrue(adminService.listRoleRuleIds("sim-role-bind").isEmpty());
+        assertTrue(adminService.listRuleRoleIds(second).isEmpty());
 
         adminService.assignRoleRules("sim-role-bind", Collections.emptyList());
         assertTrue(adminService.listRoleRuleIds("sim-role-bind").isEmpty());

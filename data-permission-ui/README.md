@@ -10,6 +10,7 @@ src/views/system/dataPermission/index.vue     # 规则列表
 src/views/system/dataPermission/components/
   RuleDialog.vue                              # 新增/编辑规则
   RoleRulesDialog.vue                         # 角色规则分配
+  RuleRolesDialog.vue                         # 查看规则已分配的角色
   PermissionTopology.vue                      # 查询人员或角色的权限拓扑
   PermissionTopologyGraph.vue                 # 展示关系与规则来源
 demo/                                         # 本地运行用的 Mock 环境和入口
@@ -54,7 +55,7 @@ demo/                                         # 本地运行用的 Mock 环境�
    }
    ```
 
-4. 角色 ID 使用 `sys_role.role_id`，角色分配弹窗里手动输入即可。
+4. 「角色分配」支持按角色名称或编码选择，保存时使用 `sys_role.role_id`。默认从 RuoYi-Vue 的 `GET /system/role/optionselect` 读取角色目录，需要 `system:role:query`。其他宿主可在 `src/api/system/dataPermission.js` 中适配 `listPermissionRoles`。
 
 5. 「权限拓扑」从宿主应用读取人员和角色。默认使用 RuoYi-Vue 的 `GET /system/user/list`、`GET /system/user/{userId}` 和 `GET /system/role/list`，对应 `system:user:list`、`system:user:query` 和 `system:role:list`。人员按登录账号搜索，结果同时显示姓名和账号。接入其他宿主时，在 `src/api/system/dataPermission.js` 中适配 `searchTopologySubjects` 和 `listTopologyUserRoles`。
 
@@ -69,7 +70,8 @@ demo/                                         # 本地运行用的 Mock 环境�
 - 其他关联 SQL 概括为“关联查询的结果”，不推断业务含义；展开配置可查看完整 SQL
 - 启用/停用规则
 - 删除规则
-- 给角色绑定规则（覆盖式保存）
+- 按角色名称或编码选择角色并绑定规则（覆盖式保存）
+- 规则列表中的「查看角色」可反查已绑定的角色名称和 ID。角色名称来自同一角色目录，目录不可用时仍显示绑定 ID。
 - 从规则列表进入「权限拓扑」，按人员或角色查看角色来源、启停状态、可见范围和目标表。点击目标表可按应用点查看启用规则的组合顺序，适用于全部应用点的规则会一并显示。
 
 ## 本地演示
@@ -95,6 +97,7 @@ node --test src/views/system/dataPermission/rulePresentation.test.js src/views/s
 | --- | --- | --- |
 | GET | `/data-permission/admin/rules?appPoint=&ruleName=` | 规则列表 |
 | GET | `/data-permission/admin/rules/{id}` | 规则详情（含复杂明细） |
+| GET | `/data-permission/admin/rules/{id}/roles` | 规则已绑定的角色 ID |
 | POST | `/data-permission/admin/rules` | 新增/更新，返回 `{id}` |
 | DELETE | `/data-permission/admin/rules/{ids}` | 删除，多个 id 用逗号分隔 |
 | GET | `/data-permission/admin/roles/{roleId}/rules` | 角色已绑定规则 id |

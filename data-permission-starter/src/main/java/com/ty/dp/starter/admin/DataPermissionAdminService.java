@@ -156,6 +156,15 @@ public class DataPermissionAdminService {
         return jdbc().queryForList(sql, new MapSqlParameterSource("roleId", roleId), String.class);
     }
 
+    public List<String> listRuleRoleIds(String ruleId) {
+        String ruleTable = SqlIdentifiers.table(properties.getTable().getRule());
+        String bindingTable = SqlIdentifiers.table(properties.getTable().getRoleRule());
+        String sql = "select distinct b.role_id from " + bindingTable + " b "
+                + "join " + ruleTable + " r on r.id = b.rule_id and r.is_del = '0' "
+                + "where b.rule_id = :ruleId and b.is_del = '0' order by b.role_id";
+        return jdbc().queryForList(sql, new MapSqlParameterSource("ruleId", ruleId), String.class);
+    }
+
     @Transactional
     public void assignRoleRules(String roleId, List<String> ruleIds) {
         transaction().execute(status -> { assignRoleRulesInTransaction(roleId, ruleIds); return null; });

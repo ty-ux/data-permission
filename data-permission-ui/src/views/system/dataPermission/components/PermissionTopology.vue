@@ -8,32 +8,46 @@
       <el-button size="small" icon="el-icon-back" @click="$emit('back')">返回规则列表</el-button>
     </header>
 
-    <form class="topology-query" @submit.prevent="search">
-      <fieldset>
-        <legend>查看对象</legend>
-        <label><input v-model="type" type="radio" value="user"> 人员</label>
-        <label><input v-model="type" type="radio" value="role"> 角色</label>
-      </fieldset>
-      <div class="topology-filter">
-        <label for="topology-keyword">{{ isUser ? '人员账号' : '角色名称' }}</label>
+    <el-form class="topology-query" label-position="top" size="small" @submit.native.prevent="search">
+      <el-form-item>
+        <span id="topology-mode-label" slot="label">查看对象</span>
+        <el-radio-group v-model="type" aria-labelledby="topology-mode-label">
+          <el-radio-button label="user" name="type">人员</el-radio-button>
+          <el-radio-button label="role" name="type">角色</el-radio-button>
+        </el-radio-group>
+      </el-form-item>
+      <el-form-item :label="isUser ? '人员账号' : '角色名称'" for="topology-keyword">
         <div class="topology-search">
-          <input
+          <el-input
             id="topology-keyword"
-            v-model.trim="keyword"
-            type="search"
+            v-model="keyword"
+            class="topology-field"
+            name="keyword"
+            enterkeyhint="search"
+            autocorrect="off"
+            autocapitalize="none"
+            spellcheck="false"
             :placeholder="isUser ? '输入登录账号' : '输入角色名称'"
-          >
-          <el-button size="small" native-type="submit" :loading="searching">搜索</el-button>
+            clearable
+          />
+          <el-button type="primary" native-type="submit" :loading="searching">搜索</el-button>
         </div>
-      </div>
-      <div class="topology-filter">
-        <label for="topology-subject">{{ isUser ? '选择人员' : '选择角色' }}</label>
-        <select id="topology-subject" v-model="subjectId" :disabled="searching || !options.length" @change="load">
-          <option value="">{{ isUser ? '请选择人员' : '请选择角色' }}</option>
-          <option v-for="option in options" :key="option.id" :value="option.id">{{ option.label }}</option>
-        </select>
-      </div>
-    </form>
+      </el-form-item>
+      <el-form-item :label="isUser ? '选择人员' : '选择角色'" for="topology-subject">
+        <el-select
+          id="topology-subject"
+          v-model="subjectId"
+          class="topology-field"
+          name="subjectId"
+          :placeholder="isUser ? '请选择人员' : '请选择角色'"
+          :disabled="searching || !options.length"
+          clearable
+          @change="load"
+        >
+          <el-option v-for="option in options" :key="option.id" :value="option.id" :label="option.label" />
+        </el-select>
+      </el-form-item>
+    </el-form>
     <p v-if="searchNote" class="topology-note" role="status">{{ searchNote }}</p>
 
     <div v-if="error" class="topology-message" role="alert">
@@ -90,10 +104,10 @@
           </template>
           <template v-else>
             <label for="topology-app-point">按应用点查看组合</label>
-            <select id="topology-app-point" v-model="appPoint">
-              <option value="">未指定应用点</option>
-              <option v-for="point in tableAppPoints" :key="point" :value="point">{{ point }}</option>
-            </select>
+            <el-select id="topology-app-point" v-model="appPoint" size="small" placeholder="未指定应用点">
+              <el-option value="" label="未指定应用点" />
+              <el-option v-for="point in tableAppPoints" :key="point" :value="point" :label="point" />
+            </el-select>
             <p>{{ appPoint ? '包含适用于全部应用点的规则。' : '未指定应用点时，匹配该表的所有应用点。' }}</p>
             <p v-if="!tableRules.length">该表在此应用点下没有已启用的规则。</p>
             <template v-else>
@@ -189,7 +203,7 @@ export default {
       this.searchNote = ''
       this.searching = true
       try {
-        const { options, total } = await searchTopologySubjects(this.type, this.keyword)
+        const { options, total } = await searchTopologySubjects(this.type, this.keyword.trim())
         if (seq !== this.searchSeq) return
         this.options = options
         if (!options.length) this.searchNote = '未找到匹配的' + (this.isUser ? '人员' : '角色') + '，可调整关键词后重试。'
@@ -235,7 +249,7 @@ export default {
   color: #1d3048;
 }
 
-.topology-header, .topology-summary, .topology-query, .topology-search {
+.topology-header, .topology-summary, .topology-query {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -266,57 +280,38 @@ export default {
 .topology-query {
   align-items: flex-end;
   margin: 20px 0 12px;
-  padding: 14px 16px;
-  background: #f2f6fc;
-  border: 1px solid #dce5f0;
-  border-radius: 8px;
 }
 
-.topology-query fieldset {
-  padding: 0;
+.topology-query .el-form-item {
   margin: 0;
-  border: 0;
   min-width: 0;
+  max-width: 100%;
 }
 
-.topology-query legend, .topology-filter > label, .topology-inspector > label {
+.topology-query ::v-deep .el-form-item__label {
+  padding-bottom: 4px;
+}
+
+.topology-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topology-field {
+  width: 210px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.topology-inspector > label {
   display: block;
-  margin: 0 0 5px;
-  padding: 0;
+  margin-bottom: 5px;
   font-size: 13px;
   font-weight: 600;
 }
 
-.topology-query fieldset label {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  margin-right: 6px;
-  gap: 4px;
-}
-
-.topology-search {
-  gap: 6px;
-}
-
-.topology-filter {
-  min-width: 0;
-}
-
-.topology-filter input, .topology-filter select, .topology-inspector select {
-  box-sizing: border-box;
-  width: 200px;
-  max-width: 100%;
-  min-height: 34px;
-  padding: 5px 8px;
-  border: 1px solid #a4b6c9;
-  border-radius: 4px;
-  background: #fff;
-  color: inherit;
-  font: inherit;
-}
-
-.topology-inspector select {
+.topology-inspector .el-select {
   width: 100%;
 }
 

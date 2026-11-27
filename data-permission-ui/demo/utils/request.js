@@ -126,9 +126,9 @@ let roleRules = {
 }
 
 const directoryRoles = [
-  { roleId: 2, roleName: '部门成员' },
-  { roleId: 3, roleName: '项目负责人' },
-  { roleId: 4, roleName: '待分配角色' }
+  { roleId: 2, roleName: '部门成员', roleKey: 'dept_member' },
+  { roleId: 3, roleName: '项目负责人', roleKey: 'project_owner' },
+  { roleId: 4, roleName: '待分配角色', roleKey: 'unassigned' }
 ]
 const directoryUsers = [
   { userId: 101, userName: 'zhangsan', nickName: '张三', roleIds: [2, 3] },
@@ -157,6 +157,9 @@ export default function request(config) {
   const params = config.params || {}
   const data = config.data || {}
 
+  if (method === 'get' && path === '/system/role/optionselect') {
+    return delay({ data: directoryRoles })
+  }
   if (method === 'get' && (path === '/system/user/list' || path === '/system/role/list')) {
     const isUser = path === '/system/user/list'
     const field = isUser ? 'userName' : 'roleName'
@@ -170,6 +173,15 @@ export default function request(config) {
     const user = directoryUsers.find(row => String(row.userId) === userPath[1])
     if (!user) return Promise.reject(new Error('人员不存在'))
     return delay({ data: user, roleIds: user.roleIds, roles: directoryRoles })
+  }
+
+  const ruleRolesPath = path.match(/^\/data-permission\/admin\/rules\/([^/]+)\/roles$/)
+  if (method === 'get' && ruleRolesPath) {
+    const ruleId = decodeURIComponent(ruleRolesPath[1])
+    const roleIds = rules.some(rule => rule.id === ruleId)
+      ? Object.keys(roleRules).filter(id => roleRules[id].includes(ruleId)).sort()
+      : []
+    return delay(roleIds)
   }
 
   // Demo-only fixtures. Production validation always runs in the starter's SQL parser.

@@ -44,10 +44,34 @@ export function listRoleRuleIds(roleId) {
 
 export function assignRoleRules(roleId, ruleIds) {
   return request({
-    url: BASE_URL + '/roles/' + roleId + '/rules',
+    url: BASE_URL + '/roles/' + encodeURIComponent(roleId) + '/rules',
     method: 'put',
     data: { ruleIds }
   })
+}
+
+export function listPermissionRoles() {
+  return request({ url: '/system/role/optionselect', method: 'get' }).then(({ data }) =>
+    data.map(role => ({
+      id: String(role.roleId),
+      name: role.roleName,
+      label: role.roleKey ? role.roleName + '（' + role.roleKey + '）' : role.roleName
+    })))
+}
+
+export async function listRuleRoles(ruleId) {
+  const roleIds = await request({
+    url: BASE_URL + '/rules/' + encodeURIComponent(ruleId) + '/roles',
+    method: 'get'
+  })
+  if (!Array.isArray(roleIds)) throw new Error('响应缺少角色绑定')
+  if (!roleIds.length) return []
+
+  // The bindings are authoritative. A missing or inaccessible directory only affects names.
+  const names = await listPermissionRoles()
+    .then(roles => new Map(roles.map(role => [role.id, role.name])))
+    .catch(() => new Map())
+  return roleIds.map(id => ({ id, name: names.get(String(id)) }))
 }
 
 export function validateRule(data) {

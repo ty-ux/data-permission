@@ -9,21 +9,29 @@
     :before-close="handleClose"
     @closed="reset"
   >
-    <el-form label-width="90px" size="small" :disabled="saving">
-      <el-form-item label="角色 ID">
-        <el-input
-          v-model.trim="roleId"
-          placeholder="如：2"
-          style="width: 220px"
-          @input="handleRoleIdChange"
-          @keyup.enter.native="loadAssigned"
-        />
-        <el-button type="primary" size="mini" style="margin-left: 8px" :loading="loading" :disabled="saving" @click="loadAssigned">
-          加载
-        </el-button>
-      </el-form-item>
-      <el-form-item label="绑定规则">
+    <el-form label-width="90px" size="small" :disabled="saving" @submit.native.prevent>
+      <el-form-item label="角色" for="dp-assignment-role">
         <el-select
+          id="dp-assignment-role"
+          v-model="roleId"
+          filterable
+          clearable
+          :loading="loadingOptions"
+          :disabled="optionsFailed"
+          style="width: 100%"
+          placeholder="按角色名称或编码搜索"
+          @change="loadAssigned"
+        >
+          <el-option v-for="role in roles" :key="role.id" :value="role.id" :label="role.label" />
+        </el-select>
+        <div v-if="optionsFailed || bindingsFailed" role="alert">
+          {{ optionsFailed ? '角色或规则列表加载失败。' : '角色绑定加载失败。' }}
+          <el-button type="text" size="small" @click="optionsFailed ? loadOptions() : loadAssigned()">重新加载</el-button>
+        </div>
+      </el-form-item>
+      <el-form-item label="绑定规则" for="dp-assignment-rules">
+        <el-select
+          id="dp-assignment-rules"
           v-model="assignedRuleIds"
           multiple
           filterable
@@ -38,17 +46,17 @@
       </el-form-item>
     </el-form>
     <div class="dp-hint">
-      保存会覆盖该角色现有的规则绑定；角色 ID 对应 <code>sys_role.role_id</code>。进入页面后先填写角色 ID 并点击“加载”。绑定的规则全部停用时，该角色将看不到受管数据表的数据。
+      选择角色后会自动加载已绑定的规则。保存会覆盖该角色现有的规则绑定。
     </div>
     <span slot="footer">
       <el-button :disabled="saving" @click="visible = false">取消</el-button>
-      <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
+      <el-button type="primary" :loading="saving" :disabled="!loadedRoleId || loadedRoleId !== roleId" @click="submit">保存</el-button>
     </span>
   </el-dialog>
 </template>
 
 <script>
-import { listRules, listRoleRuleIds, assignRoleRules } from '@/api/system/dataPermission'
+import { listRules, listPermissionRoles, listRoleRuleIds, assignRoleRules } from '@/api/system/dataPermission'
 
 export default {
   name: 'RoleRulesDialog',
@@ -56,41 +64,39 @@ export default {
     return {
       visible: false,
       loading: false,
+      loadingOptions: false,
+      optionsFailed: false,
+      bindingsFailed: false,
       saving: false,
       session: 0,
       loadSeq: 0,
       roleId: '',
       loadedRoleId: null,
       assignedRuleIds: [],
-      allRules: []
+      allRules: [],
+      roles: []
     }
   },
   methods: {
     open() {
-      const token = ++this.session
+      this.reset()
       this.visible = true
-      this.roleId = ''
-      this.loadedRoleId = null
-      this.assignedRuleIds = []
-      this.allRules = []
-      this.loading = true
-      listRules({})
-        .then(res => {
-          if (token !== this.session) {
-            return
-          }
-          this.allRules = res || []
-        })
-        .catch(() => {
-          if (token === this.session) {
-            this.$message.error('规则列表加载失败')
-          }
-        })
-        .finally(() => {
-          if (token === this.session) {
-            this.loading = false
-          }
-        })
+      this.loadOptions()
+    },
+    async loadOptions() {
+      const token = ++this.session
+      this.loadingOptions = true
+      this.optionsFailed = false
+      try {
+        const [roles, rules] = await Promise.all([listPermissionRoles(), listRules({})])
+        if (token !== this.session) return
+        this.roles = roles
+        this.allRules = rules || []
+      } catch {
+        if (token === this.session) this.optionsFailed = true
+      } finally {
+        if (token === this.session) this.loadingOptions = false
+      }
     },
     handleClose(done) {
       if (this.saving) {
@@ -98,54 +104,28 @@ export default {
       }
       done()
     },
-    handleRoleIdChange() {
+    async loadAssigned() {
+      const roleId = this.roleId
+      const seq = ++this.loadSeq
       this.loadedRoleId = null
       this.assignedRuleIds = []
-      this.loading = false
-      this.loadSeq++
-    },
-    isValidRoleId(roleId) {
-      return /^\d+$/.test(String(roleId || '').trim())
-    },
-    loadAssigned() {
-      const roleId = String(this.roleId || '').trim()
-      if (!roleId) {
-        this.$message.error('请输入角色 ID')
-        return
+      this.loading = Boolean(roleId)
+      this.bindingsFailed = false
+      if (!roleId) return
+      try {
+        const ruleIds = await listRoleRuleIds(roleId)
+        if (seq !== this.loadSeq) return
+        this.assignedRuleIds = ruleIds || []
+        this.loadedRoleId = roleId
+      } catch {
+        if (seq === this.loadSeq) this.bindingsFailed = true
+      } finally {
+        if (seq === this.loadSeq) this.loading = false
       }
-      if (!this.isValidRoleId(roleId)) {
-        this.$message.error('角色 ID 必须是数字')
-        return
-      }
-      const seq = ++this.loadSeq
-      this.loading = true
-      listRoleRuleIds(roleId)
-        .then(res => {
-          if (seq !== this.loadSeq || roleId !== String(this.roleId || '').trim()) {
-            return
-          }
-          this.assignedRuleIds = res || []
-          this.loadedRoleId = roleId
-        })
-        .catch(() => {})
-        .finally(() => {
-          if (seq === this.loadSeq) {
-            this.loading = false
-          }
-        })
     },
     submit() {
-      const roleId = String(this.roleId || '').trim()
-      if (!roleId) {
-        this.$message.error('请输入角色 ID')
-        return
-      }
-      if (!this.isValidRoleId(roleId)) {
-        this.$message.error('角色 ID 必须是数字')
-        return
-      }
-      if (this.loadedRoleId !== roleId) {
-        this.$message.error('请先加载该角色当前的规则')
+      const roleId = this.roleId
+      if (!roleId || this.loadedRoleId !== roleId) {
         return
       }
       const ruleIds = this.assignedRuleIds.slice()
@@ -173,7 +153,8 @@ export default {
             return
           }
           const disabledTip = disabledCount ? '，另有 ' + disabledCount + ' 条停用规则' : ''
-          this.$message.success('保存成功：角色 ' + roleId + ' 绑定 ' + enabledCount + ' 条启用规则' + disabledTip)
+          const role = this.roles.find(option => option.id === roleId)
+          this.$message.success('保存成功：' + role.name + '绑定 ' + enabledCount + ' 条启用规则' + disabledTip)
           this.visible = false
           this.$emit('saved')
         })
@@ -190,13 +171,19 @@ export default {
       return disabled + (rule.ruleName || rule.id) + '（' + (rule.tableName || '-') + appPoint + '）'
     },
     reset() {
+      if (this.visible) return
+      this.session++
+      this.loadSeq++
       this.roleId = ''
       this.loadedRoleId = null
       this.assignedRuleIds = []
       this.allRules = []
+      this.roles = []
       this.loading = false
+      this.loadingOptions = false
+      this.optionsFailed = false
+      this.bindingsFailed = false
       this.saving = false
-      this.loadSeq++
     }
   }
 }

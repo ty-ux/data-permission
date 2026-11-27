@@ -42,6 +42,11 @@ public class DataPermissionAdminController {
         return adminService.getRule(id);
     }
 
+    @GetMapping("/rules/{id}/roles")
+    public List<String> ruleRoles(@PathVariable String id) {
+        return adminService.listRuleRoleIds(id);
+    }
+
     @GetMapping("/subquery-fields")
     public java.util.Set<String> subqueryFields() { return com.ty.dp.core.sql.SubqueryTemplate.FIELDS; }
 
